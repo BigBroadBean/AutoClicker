@@ -1,3 +1,5 @@
+[English](README.md) | [中文](README_CN.md)
+
 # AutoClicker
 
 A lightweight Windows auto-clicker with a modern dark UI, built with C++20 and GDI.

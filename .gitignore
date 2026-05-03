@@ -1,0 +1,52 @@
+## Visual Studio
+.vs/
+*.sln.docstates
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+## Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Bb]in/
+[Oo]bj/
+*.exe
+*.dll
+*.ilk
+*.pdb
+*.exp
+*.lib
+*.sbr
+*.bsc
+*.idb
+*.pch
+*.res
+*.tlog
+*.tlb
+*.tmp
+*.log
+*.ipdb
+*.iobj
+*.ipch
+*.db
+*.cache
+*.aps
+*.ncb
+*.opendb
+*.opensdf
+*.VC.db
+*.VC.opendb
+
+## Visual Studio files
+*.vcxproj.user
+*.sln.cache
+*.sln.VC
+
+## OS files
+Thumbs.db
+Desktop.ini
+*.DS_Store

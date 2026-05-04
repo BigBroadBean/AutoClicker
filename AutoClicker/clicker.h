@@ -5,6 +5,7 @@
 
 extern int cpsLeft10;
 extern int cpsRight10;
+extern int cpsMax;
 extern int leftms;
 extern int rightms;
 extern int vk_key;
@@ -22,6 +23,8 @@ extern bool multimode;
 extern bool isMultiActive;
 extern int multiMul;
 extern int multiDelayMs;
+extern bool randomCpsEnabled;
+extern int randomCpsRange;
 
 std::wstring getKeyName(int vk);
 void udmWindow();

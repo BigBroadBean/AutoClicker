@@ -30,6 +30,12 @@ void LoadConfig()
         cpsLeft10 = v;
     if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1 && v >= 5 && v <= 1000)
         cpsRight10 = v;
+    if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1 && v >= 20 && v <= 500)
+        cpsMax = v;
+    if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1)
+        randomCpsEnabled = (v != 0);
+    if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1 && v >= 1 && v <= 5)
+        randomCpsRange = v;
     if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1 && v >= 1 && v <= 255)
         vk_key = v;
     if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1)
@@ -56,6 +62,9 @@ void SaveConfig()
 
     file << cpsLeft10 << "\n"
          << cpsRight10 << "\n"
+         << cpsMax << "\n"
+         << (randomCpsEnabled ? 1 : 0) << "\n"
+         << randomCpsRange << "\n"
          << vk_key << "\n"
          << (leftenabled ? 1 : 0) << "\n"
          << (rightenabled ? 1 : 0) << "\n"

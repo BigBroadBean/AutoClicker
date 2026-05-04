@@ -1,4 +1,5 @@
 #include "clicker.h"
+#include "types.h"
 #include "config.h"
 #include "sound.h"
 #include "overlay.h"
@@ -7,9 +8,12 @@
 #include <thread>
 #include <chrono>
 #include <string>
+#include <cstdlib>
+#include <ctime>
 
 int cpsLeft10 = 100;
 int cpsRight10 = 100;
+int cpsMax = 50;
 int leftms = 50;
 int rightms = 50;
 int vk_key = 4;
@@ -27,6 +31,8 @@ bool multimode = false;
 bool isMultiActive = false;
 int multiMul = 1;
 int multiDelayMs = 20;
+bool randomCpsEnabled = false;
+int randomCpsRange = 2;
 
 std::wstring getKeyName(int vk)
 {
@@ -138,6 +144,16 @@ void ClickerThreadProc()
 {
     typedef int(WINAPI* pPostMessageA) (HWND, UINT, WPARAM, LPARAM);
     pPostMessageA MyPostMessageA = (pPostMessageA)GetProcAddress(LoadLibraryA("User32.dll"), "PostMessageA");
+    srand((unsigned)time(nullptr));
+
+    auto randDelay = [](int baseMs, int baseCps10) -> int {
+        if (!randomCpsEnabled) return baseMs;
+        int offset = (std::rand() % (randomCpsRange * 20 + 1)) - randomCpsRange * 10;
+        int cps10 = baseCps10 + offset;
+        if (cps10 < CPS_MIN10) cps10 = CPS_MIN10;
+        if (cps10 > cpsMax * 10) cps10 = cpsMax * 10;
+        return cpsToMs(cps10);
+    };
 
     for (;;) {
         if (!flag) {
@@ -186,17 +202,19 @@ void ClickerThreadProc()
         if ((leftActive && (GetAsyncKeyState(VK_LBUTTON) & 0x8000)) || (leftActive && keepClicke)) {
             GetCursorPos(&point);
             ScreenToClient(mhwnd, &point);
+            int del = randDelay(leftms, cpsLeft10);
             MyPostMessageA(mhwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(point.x, point.y));
-            std::this_thread::sleep_for(std::chrono::milliseconds(leftms));
+            std::this_thread::sleep_for(std::chrono::milliseconds(del));
             MyPostMessageA(mhwnd, WM_LBUTTONUP, 0, MAKELPARAM(point.x, point.y));
-            std::this_thread::sleep_for(std::chrono::milliseconds(leftms));
+            std::this_thread::sleep_for(std::chrono::milliseconds(del));
         } else if ((rightActive && (GetAsyncKeyState(VK_RBUTTON) & 0x8000)) || (rightActive && keepClicke)) {
             GetCursorPos(&point);
             ScreenToClient(mhwnd, &point);
+            int del = randDelay(rightms, cpsRight10);
             MyPostMessageA(mhwnd, WM_RBUTTONDOWN, MK_RBUTTON, MAKELPARAM(point.x, point.y));
-            std::this_thread::sleep_for(std::chrono::milliseconds(rightms));
+            std::this_thread::sleep_for(std::chrono::milliseconds(del));
             MyPostMessageA(mhwnd, WM_RBUTTONUP, 0, MAKELPARAM(point.x, point.y));
-            std::this_thread::sleep_for(std::chrono::milliseconds(rightms));
+            std::this_thread::sleep_for(std::chrono::milliseconds(del));
         } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }

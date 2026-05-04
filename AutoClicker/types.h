@@ -3,10 +3,14 @@
 #include <Windows.h>
 
 constexpr int WIN_W = 480;
-constexpr int WIN_H = 620;
+constexpr int WIN_H = 720;
 
 constexpr int CPS_MIN10 = 5;
 constexpr int CPS_MAX10 = 1000;
+
+constexpr int CPS_LIMIT_MIN = 20;
+constexpr int CPS_LIMIT_MAX = 500;
+constexpr int CPS_LIMIT_DEFAULT = 50;
 
 constexpr int TIMER_RENDER = 1;
 

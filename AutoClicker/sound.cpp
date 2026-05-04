@@ -5,12 +5,22 @@
 
 #pragma comment(lib, "winmm.lib")
 
-void PlayToggleSound(bool enabled)
+static void PlayMediaSound(const wchar_t* file)
 {
-    std::thread([enabled]() {
-        if (enabled)
-            PlaySound(TEXT("SystemStart"), NULL, SND_ALIAS | SND_ASYNC);
-        else
-            PlaySound(TEXT("SystemExit"), NULL, SND_ALIAS | SND_ASYNC);
+    std::thread([file]() {
+        wchar_t path[MAX_PATH];
+        swprintf(path, MAX_PATH, L"C:\\Windows\\Media\\%s", file);
+        PlaySoundW(path, NULL, SND_FILENAME | SND_ASYNC);
+        Sleep(200);
     }).detach();
+}
+
+void PlayClickerSound(bool enabled)
+{
+    PlayMediaSound(enabled ? L"Windows Hardware Insert.wav" : L"Windows Hardware Remove.wav");
+}
+
+void PlayMultiClickSound(bool enabled)
+{
+    PlayMediaSound(enabled ? L"Windows Hardware Insert.wav" : L"Windows Hardware Remove.wav");
 }

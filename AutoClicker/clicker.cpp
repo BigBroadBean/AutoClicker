@@ -10,6 +10,11 @@
 #include <string>
 #include <cstdlib>
 #include <ctime>
+#include <atomic>
+
+#pragma comment(lib, "winmm.lib")
+
+using namespace std::chrono;
 
 int cpsLeft10 = 100;
 int cpsRight10 = 100;
@@ -33,6 +38,7 @@ int multiMul = 1;
 int multiDelayMs = 20;
 bool randomCpsEnabled = false;
 int randomCpsRange = 2;
+std::atomic<long long> g_debounceUntil{ 0 };
 
 std::wstring getKeyName(int vk)
 {
@@ -155,68 +161,119 @@ void ClickerThreadProc()
         return cpsToMs(cps10);
     };
 
+    static std::atomic<bool> busyMulti{ false };
+    static std::atomic<bool> busyKey{ false };
+
+    bool prevMulti = false;
+    bool prevStart = false;
+
+    // non-blocking click state
+    enum ClickState { CS_IDLE, CS_WAIT_UP, CS_WAIT_DOWN };
+    ClickState leftSt  = CS_IDLE;
+    ClickState rightSt = CS_IDLE;
+    auto nextLeftTime  = steady_clock::now();
+    auto nextRightTime = steady_clock::now();
+    POINT lastPt = {};
+
     for (;;) {
+        auto now = steady_clock::now();
+
         if (!flag) {
-            Sleep(1);
             flag = true;
+            Sleep(1);
             continue;
         }
 
-        if (changedKey) {
-            Sleep(200);
-            changedKey = false;
+        // debounce after key rebind
+        if (GetTickCount64() < (unsigned long long)g_debounceUntil) {
+            Sleep(1);
+            continue;
         }
 
-        if (GetAsyncKeyState(vk_multi_key) & 0x8000) {
-            isMultiActive = !isMultiActive;
-            PlayToggleSound(isMultiActive);
-            ShowToggleToast(L"\x591a\x500d\x70b9", isMultiActive);
-            SaveConfig();
-            Sleep(200);
+        // multi-click hotkey - edge detect + async wait-release
+        bool curMulti = (GetAsyncKeyState(vk_multi_key) & 0x8000) != 0;
+        if (curMulti && !prevMulti && !busyMulti.exchange(true)) {
+            std::thread([]() {
+                while (GetAsyncKeyState(vk_multi_key) & 0x8000) Sleep(1);
+                isMultiActive = !isMultiActive;
+                PlayMultiClickSound(isMultiActive);
+                ShowToggleToast(L"\x591a\x500d\x70b9", isMultiActive);
+                SaveConfig();
+                busyMulti = false;
+            }).detach();
         }
+        prevMulti = curMulti;
 
-        if (GetAsyncKeyState(vk_key) & 0x8000) {
-            isstart = !isstart;
-            if (isstart) {
-                GetAsyncKeyState(VK_LBUTTON);
-                GetAsyncKeyState(VK_RBUTTON);
-                PlayToggleSound(true);
-                ShowToggleToast(L"\x8fde\x70b9\x5668", true);
-                timeBeginPeriod(1);
-            } else {
-                PlayToggleSound(false);
-                ShowToggleToast(L"\x8fde\x70b9\x5668", false);
-                timeEndPeriod(1);
-            }
-            Sleep(200);
+        // auto-clicker hotkey - edge detect + async wait-release
+        bool curStart = (GetAsyncKeyState(vk_key) & 0x8000) != 0;
+        if (curStart && !prevStart && !busyKey.exchange(true)) {
+            std::thread([]() {
+                while (GetAsyncKeyState(vk_key) & 0x8000) Sleep(1);
+                isstart = !isstart;
+                if (isstart) {
+                    GetAsyncKeyState(VK_LBUTTON);
+                    GetAsyncKeyState(VK_RBUTTON);
+                    timeBeginPeriod(1);
+                } else {
+                    timeEndPeriod(1);
+                }
+                PlayClickerSound(isstart);
+                ShowToggleToast(L"\x8fde\x70b9\x5668", isstart);
+                SaveConfig();
+                busyKey = false;
+            }).detach();
         }
+        prevStart = curStart;
 
         if (isMultiActive) {
-            Sleep(200);
+            leftSt = CS_IDLE; rightSt = CS_IDLE;
+            Sleep(1);
             continue;
         }
 
         bool leftActive = isstart && leftenabled && mhwnd != nullptr;
         bool rightActive = isstart && rightenabled && mhwnd != nullptr;
 
+        // left click state machine
         if ((leftActive && (GetAsyncKeyState(VK_LBUTTON) & 0x8000)) || (leftActive && keepClicke)) {
-            GetCursorPos(&point);
-            ScreenToClient(mhwnd, &point);
-            int del = randDelay(leftms, cpsLeft10);
-            MyPostMessageA(mhwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(point.x, point.y));
-            std::this_thread::sleep_for(std::chrono::milliseconds(del));
-            MyPostMessageA(mhwnd, WM_LBUTTONUP, 0, MAKELPARAM(point.x, point.y));
-            std::this_thread::sleep_for(std::chrono::milliseconds(del));
-        } else if ((rightActive && (GetAsyncKeyState(VK_RBUTTON) & 0x8000)) || (rightActive && keepClicke)) {
-            GetCursorPos(&point);
-            ScreenToClient(mhwnd, &point);
-            int del = randDelay(rightms, cpsRight10);
-            MyPostMessageA(mhwnd, WM_RBUTTONDOWN, MK_RBUTTON, MAKELPARAM(point.x, point.y));
-            std::this_thread::sleep_for(std::chrono::milliseconds(del));
-            MyPostMessageA(mhwnd, WM_RBUTTONUP, 0, MAKELPARAM(point.x, point.y));
-            std::this_thread::sleep_for(std::chrono::milliseconds(del));
+            if (now >= nextLeftTime) {
+                GetCursorPos(&lastPt);
+                ScreenToClient(mhwnd, &lastPt);
+                LPARAM lp = MAKELPARAM(lastPt.x, lastPt.y);
+                if (leftSt != CS_WAIT_UP) {
+                    MyPostMessageA(mhwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp);
+                    leftSt = CS_WAIT_UP;
+                } else {
+                    MyPostMessageA(mhwnd, WM_LBUTTONUP, 0, lp);
+                    leftSt = CS_IDLE;
+                }
+                int del = randDelay(leftms, cpsLeft10);
+                nextLeftTime = now + milliseconds(del);
+            }
         } else {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            leftSt = CS_IDLE;
         }
+
+        // right click state machine
+        if ((rightActive && (GetAsyncKeyState(VK_RBUTTON) & 0x8000)) || (rightActive && keepClicke)) {
+            if (now >= nextRightTime) {
+                GetCursorPos(&lastPt);
+                ScreenToClient(mhwnd, &lastPt);
+                LPARAM lp = MAKELPARAM(lastPt.x, lastPt.y);
+                if (rightSt != CS_WAIT_UP) {
+                    MyPostMessageA(mhwnd, WM_RBUTTONDOWN, MK_RBUTTON, lp);
+                    rightSt = CS_WAIT_UP;
+                } else {
+                    MyPostMessageA(mhwnd, WM_RBUTTONUP, 0, lp);
+                    rightSt = CS_IDLE;
+                }
+                int del = randDelay(rightms, cpsRight10);
+                nextRightTime = now + milliseconds(del);
+            }
+        } else {
+            rightSt = CS_IDLE;
+        }
+
+        Sleep(1);
     }
 }

@@ -1,3 +1,4 @@
 #pragma once
 
-void PlayToggleSound(bool enabled);
+void PlayClickerSound(bool enabled);
+void PlayMultiClickSound(bool enabled);

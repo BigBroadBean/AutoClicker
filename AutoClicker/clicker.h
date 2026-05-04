@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 #include <string>
+#include <atomic>
 
 extern int cpsLeft10;
 extern int cpsRight10;
@@ -25,6 +26,7 @@ extern int multiMul;
 extern int multiDelayMs;
 extern bool randomCpsEnabled;
 extern int randomCpsRange;
+extern std::atomic<long long> g_debounceUntil;
 
 std::wstring getKeyName(int vk);
 void udmWindow();

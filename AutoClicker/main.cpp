@@ -2,7 +2,6 @@
 #include "ui.h"
 #include "clicker.h"
 #include "config.h"
-#include "sound.h"
 #include "overlay.h"
 
 #include <Windows.h>
@@ -514,7 +513,7 @@ static void Click(HWND hwnd, Elem e)
         break;
     case E_MODE_L: if (multimode) goto doModeSwitch; break;
     case E_MODE_R: if (!multimode) goto doModeSwitch; break;
-    case E_BTN_KEY: changedKey = true;
+    case E_BTN_KEY:
         for (;;) {
             for (int i = 1; i < 256; i++) {
                 if (GetAsyncKeyState(i) & 0x8000) {
@@ -523,6 +522,7 @@ static void Click(HWND hwnd, Elem e)
                         vk_multi_key = i;
                     else
                         vk_key = i;
+                    g_debounceUntil = GetTickCount64() + 200;
                     SaveConfig(); Redraw(hwnd); return;
                 }
             }

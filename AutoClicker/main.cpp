@@ -3,6 +3,7 @@
 #include "clicker.h"
 #include "config.h"
 #include "overlay.h"
+#include "sound.h"
 
 #include <Windows.h>
 #include <dwmapi.h>
@@ -24,7 +25,7 @@ static HFONT    g_hfCPS   = nullptr;
 static int      g_cx = WIN_W, g_cy = WIN_H;
 
 // ---- interactive elements ----
-enum Elem { E_NONE = -1, E_SL_L, E_SL_R, E_SL_MAX, E_SL_RAND, E_TGL_L, E_TGL_R, E_BTN_KEY, E_BTN_KEEP, E_MODE_L, E_MODE_R, E_CHK_RAND, E_INP_MAX, E_COUNT };
+enum Elem { E_NONE = -1, E_SL_L, E_SL_R, E_SL_MAX, E_SL_RAND, E_TGL_L, E_TGL_R, E_BTN_KEY, E_BTN_KEEP, E_MODE_L, E_MODE_R, E_CHK_RAND, E_INP_MAX, E_BTN_SCROLL_L, E_BTN_SCROLL_R, E_BTN_SCROLL_KEY, E_TGL_SCROLL, E_COUNT };
 struct HR { RECT r; Elem id; bool hover; };
 static HR   g_hr[E_COUNT] = {};
 static Elem g_drag = E_NONE;
@@ -34,9 +35,9 @@ static wchar_t g_inputBuf[8] = {};
 
 // ---- layout rects ----
 struct LY {
-    RECT title, card[6], track[4], thumb[4];
-    RECT tgl[2], btnKey, btnKeep, info, info2, status, sep;
-    RECT modeBtn, inpMax, chkRand;
+    RECT title, card[7], track[4], thumb[4];
+    RECT tgl[3], btnKey, btnKeep, info, info2, status, sep;
+    RECT modeBtn, inpMax, chkRand, btnScrollLR, btnScrollKey;
 } L;
 
 static bool PtIn(const RECT& r, int x, int y) {
@@ -51,38 +52,47 @@ static void Layout()
 
     L.card[0] = { 16,  60, W - 16, 170 };
     L.card[1] = { 16, 186, W - 16, 296 };
-    L.card[2] = { 16, 312, W - 16, 378 };
-    L.card[3] = { 16, 396, W - 16, 450 };
-    L.card[4] = { 16, 468, W - 16, 522 };
-    L.card[5] = { 16, 540, W - 16, 610 };
+    L.card[2] = { 16, 312, W - 16, 374 };
+    L.card[3] = { 16, 392, W - 16, 458 };
+    L.card[4] = { 16, 476, W - 16, 530 };
+    L.card[5] = { 16, 548, W - 16, 602 };
+    L.card[6] = { 16, 620, W - 16, 690 };
 
     auto Slider = [](const RECT& c) -> RECT {
         return { c.left + 16, c.top + 32, c.right - 106, c.top + 38 };
     };
     L.track[0] = Slider(L.card[0]);
     L.track[1] = Slider(L.card[1]);
-    L.track[2] = Slider(L.card[4]);
-    L.track[3] = { L.card[5].left + 16, L.card[5].top + 46,
-                   L.card[5].right - 106, L.card[5].top + 52 };
+    L.track[2] = Slider(L.card[5]);
+    L.track[3] = { L.card[6].left + 16, L.card[6].top + 46,
+                   L.card[6].right - 106, L.card[6].top + 52 };
 
     L.tgl[0] = { L.card[0].right - 90, L.card[0].top + 24,
                  L.card[0].right - 20, L.card[0].top + 54 };
     L.tgl[1] = { L.card[1].right - 90, L.card[1].top + 24,
                  L.card[1].right - 20, L.card[1].top + 54 };
+    L.tgl[2] = { L.card[2].right - 90, L.card[2].top + 24,
+                 L.card[2].right - 20, L.card[2].top + 54 };
 
-    L.btnKey = { L.card[2].left + 16, L.card[2].top + 26,
-                 L.card[2].left + 300, L.card[2].top + 56 };
-    L.btnKeep = { L.card[3].left + 16, L.card[3].top + 26,
-                  L.card[3].left + 210, L.card[3].top + 46 };
+    int keyCard = multimode ? 2 : 3;
+    L.btnKey = { L.card[keyCard].left + 16, L.card[keyCard].top + 26,
+                 L.card[keyCard].left + 300, L.card[keyCard].top + 56 };
+    L.btnKeep = { L.card[4].left + 16, L.card[4].top + 26,
+                  L.card[4].left + 210, L.card[4].top + 46 };
 
     L.modeBtn = { L.title.right - 120, L.title.top + 8,
                   L.title.right - 16,  L.title.bottom - 8 };
 
     L.inpMax = { L.track[2].right + 8, L.track[2].top - 6,
-                 L.card[4].right - 20, L.track[2].bottom + 6 };
+                 L.card[5].right - 20, L.track[2].bottom + 6 };
 
-    L.chkRand = { L.card[5].left + 16, L.card[5].top + 26,
-                  L.card[5].left + 180, L.card[5].top + 46 };
+    L.chkRand = { L.card[6].left + 16, L.card[6].top + 26,
+                  L.card[6].left + 180, L.card[6].top + 46 };
+
+    L.btnScrollLR = { L.card[2].left + 152, L.card[2].top + 26,
+                      L.card[2].right - 100, L.card[2].top + 52 };
+    L.btnScrollKey = { L.card[2].left + 16, L.card[2].top + 26,
+                       L.card[2].left + 146, L.card[2].top + 52 };
 
     L.info   = { 16, H - 94, W - 16, H - 74 };
     L.info2  = { 16, H - 72, W - 16, H - 52 };
@@ -99,12 +109,20 @@ static void Layout()
     g_hr[E_SL_RAND] = { L.thumb[3], E_SL_RAND, false };
     g_hr[E_TGL_L]   = { L.tgl[0],   E_TGL_L, false };
     g_hr[E_TGL_R]   = { L.tgl[1],   E_TGL_R, false };
+    g_hr[E_TGL_SCROLL] = { L.tgl[2], E_TGL_SCROLL, false };
     g_hr[E_BTN_KEY] = { L.btnKey,   E_BTN_KEY, false };
     g_hr[E_BTN_KEEP] = { L.btnKeep, E_BTN_KEEP, false };
     g_hr[E_MODE_L] = { { L.modeBtn.left, L.modeBtn.top, (L.modeBtn.left + L.modeBtn.right) / 2, L.modeBtn.bottom }, E_MODE_L, false };
     g_hr[E_MODE_R] = { { (L.modeBtn.left + L.modeBtn.right) / 2, L.modeBtn.top, L.modeBtn.right, L.modeBtn.bottom }, E_MODE_R, false };
     g_hr[E_INP_MAX] = { L.inpMax, E_INP_MAX, false };
     g_hr[E_CHK_RAND] = { L.chkRand, E_CHK_RAND, false };
+    {
+        RECT& b = L.btnScrollLR;
+        int midX = (b.left + b.right) / 2;
+        g_hr[E_BTN_SCROLL_L] = { { b.left, b.top, midX, b.bottom }, E_BTN_SCROLL_L, false };
+        g_hr[E_BTN_SCROLL_R] = { { midX, b.top, b.right, b.bottom }, E_BTN_SCROLL_R, false };
+    }
+    g_hr[E_BTN_SCROLL_KEY] = { L.btnScrollKey, E_BTN_SCROLL_KEY, false };
 }
 
 // ---- GDI init ----
@@ -172,7 +190,7 @@ static void Paint()
     HPEN   pn = CreatePen(PS_SOLID, 1, CLR_BORDER);
     HBRUSH br = CreateSolidBrush(CLR_CARD);
     SelectObject(dc, pn); SelectObject(dc, br);
-    for (int i = 0; i < (multimode ? 3 : 6); i++)
+    for (int i = 0; i < (multimode ? 3 : 7); i++)
         RoundRect(dc, L.card[i].left, L.card[i].top, L.card[i].right, L.card[i].bottom, 10, 10);
     DeleteObject(pn); DeleteObject(br);
 
@@ -235,10 +253,10 @@ static void Paint()
     // card labels
     SelectObject(dc, g_hfLabel);
     SetTextColor(dc, CLR_TEXT);
-    const wchar_t* namesNormal[6] = { L"左键", L"右键", L"快捷键", L"模式", L"CPS上限", L"随机CPS" };
+    const wchar_t* namesNormal[7] = { L"左键", L"右键", L"滚轮点击", L"快捷键", L"模式", L"CPS上限", L"随机CPS" };
     const wchar_t* namesMulti[3]  = { L"倍率", L"延迟", L"快捷键" };
     const wchar_t** names = multimode ? namesMulti : namesNormal;
-    int cardCount = multimode ? 3 : 6;
+    int cardCount = multimode ? 3 : 7;
     for (int i = 0; i < cardCount; i++) {
         RECT r = { L.card[i].left + 16, L.card[i].top + 6,
                    L.card[i].right, L.card[i].top + 26 };
@@ -345,6 +363,73 @@ static void Paint()
             RECT r2 = { r.right + 4, r.top, L.card[i].right - 8, r.bottom };
             DrawTextW(dc, buf, -1, &r2, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         }
+        // scroll wheel click card - hotkey + left/right selector
+        {
+            RECT& b = L.btnScrollKey;
+            HPEN p = CreatePen(PS_SOLID, 1, CLR_BORDER);
+            HBRUSH brb = CreateSolidBrush(g_hr[E_BTN_SCROLL_KEY].hover ? CLR_BTN_HOVER : CLR_BTN);
+            SelectObject(dc, p); SelectObject(dc, brb);
+            RoundRect(dc, b.left, b.top, b.right, b.bottom, 8, 8);
+            DeleteObject(p); DeleteObject(brb);
+            SelectObject(dc, g_hfBody);
+            SetTextColor(dc, CLR_TEXT);
+            std::wstring t = L"快捷键: " + getKeyName(vk_scroll_key);
+            DrawTextW(dc, t.c_str(), -1, (RECT*)&b, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+        // scroll left/right selector
+        {
+            RECT& b = L.btnScrollLR;
+            int midX = (b.left + b.right) / 2;
+            bool lHover = g_hr[E_BTN_SCROLL_L].hover;
+            bool rHover = g_hr[E_BTN_SCROLL_R].hover;
+            COLORREF bg = (lHover || rHover) ? CLR_BTN_HOVER : CLR_BTN;
+
+            HBRUSH bgBrush = CreateSolidBrush(bg);
+            HPEN noPen = (HPEN)GetStockObject(NULL_PEN);
+            SelectObject(dc, noPen); SelectObject(dc, bgBrush);
+            RoundRect(dc, b.left, b.top, b.right, b.bottom, 8, 8);
+            DeleteObject(bgBrush);
+
+            SaveDC(dc);
+            IntersectClipRect(dc,
+                scrollClickButton == 0 ? b.left : midX,
+                b.top,
+                scrollClickButton == 0 ? midX : b.right,
+                b.bottom);
+            HPEN actPen = CreatePen(PS_SOLID, 1, CLR_ACCENT);
+            HBRUSH actBrush = CreateSolidBrush(CLR_ACCENT);
+            SelectObject(dc, actPen); SelectObject(dc, actBrush);
+            RoundRect(dc, b.left, b.top, b.right, b.bottom, 8, 8);
+            DeleteObject(actPen); DeleteObject(actBrush);
+            RestoreDC(dc, -1);
+
+            HPEN outline = CreatePen(PS_SOLID, 1, CLR_BORDER);
+            SelectObject(dc, outline); SelectObject(dc, GetStockObject(NULL_BRUSH));
+            RoundRect(dc, b.left, b.top, b.right, b.bottom, 8, 8);
+            DeleteObject(outline);
+
+            SelectObject(dc, g_hfBody);
+            RECT rl = { b.left, b.top, midX, b.bottom };
+            RECT rr = { midX, b.top, b.right, b.bottom };
+            SetTextColor(dc, scrollClickButton == 0 ? RGB(0, 0, 0) : CLR_TEXT_DIM);
+            DrawTextW(dc, L"左键", -1, &rl, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            SetTextColor(dc, scrollClickButton == 1 ? RGB(0, 0, 0) : CLR_TEXT_DIM);
+            DrawTextW(dc, L"右键", -1, &rr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+        // scroll toggle button
+        {
+            RECT& tg = L.tgl[2];
+            bool on = isScrollClickActive;
+            COLORREF bg = on ? CLR_GREEN : CLR_BTN;
+            HPEN pt = CreatePen(PS_SOLID, 1, bg);
+            HBRUSH bt = CreateSolidBrush(bg);
+            SelectObject(dc, pt); SelectObject(dc, bt);
+            RoundRect(dc, tg.left, tg.top, tg.right, tg.bottom, 16, 16);
+            DeleteObject(pt); DeleteObject(bt);
+            SelectObject(dc, g_hfLabel);
+            SetTextColor(dc, on ? RGB(0, 0, 0) : CLR_TEXT_DIM);
+            DrawTextW(dc, on ? L"开" : L"关", -1, (RECT*)&tg, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
         // input box
         RECT& bi = L.inpMax;
         COLORREF inpBorder = g_hr[E_INP_MAX].hover || g_inputOn ? CLR_ACCENT : CLR_BORDER;
@@ -389,8 +474,8 @@ static void Paint()
         if (randomCpsEnabled) {
             wchar_t bufR[32];
             swprintf(bufR, 32, L"±%d CPS", randomCpsRange);
-            RECT rRand = { L.card[5].left + 16, L.card[5].top + 52,
-                           L.card[5].right - 8, L.card[5].top + 64 };
+            RECT rRand = { L.card[6].left + 16, L.card[6].top + 52,
+                           L.card[6].right - 8, L.card[6].top + 64 };
             SetTextColor(dc, CLR_TEXT);
             SelectObject(dc, g_hfCPS);
             DrawTextW(dc, bufR, -1, &rRand, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -405,20 +490,22 @@ static void Paint()
         float rc = rightenabled ? cpsRight10 / 10.0f : 0;
         wchar_t buf[128];
         if (randomCpsEnabled)
-            swprintf(buf, 128, L"连点器: 左 %.1f cps (%d ms)  右 %.1f cps (%d ms)  上限 %d  随机 ±%d",
-                     lc, leftms, rc, rightms, cpsMax, randomCpsRange);
+            swprintf(buf, 128, L"连点器: 左 %.1f 右 %.1f  上限 %d  随机 ±%d",
+                     lc, rc, cpsMax, randomCpsRange);
         else
-            swprintf(buf, 128, L"连点器: 左 %.1f cps (%d ms)  右 %.1f cps (%d ms)  上限 %d",
-                     lc, leftms, rc, rightms, cpsMax);
+            swprintf(buf, 128, L"连点器: 左 %.1f 右 %.1f  上限 %d",
+                     lc, rc, cpsMax);
         SetTextColor(dc, CLR_TEXT_DIM);
         DrawTextW(dc, buf, -1, &L.info, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         // multi-click info
-        swprintf(buf, 128, L"多倍点: %d 倍  间隔 %d ms", multiMul, multiDelayMs);
+        swprintf(buf, 128, L"多倍点: %d 倍  间隔 %d ms  滚轮点击: %s",
+                 multiMul, multiDelayMs,
+                 isScrollClickActive ? L"开" : L"关");
         DrawTextW(dc, buf, -1, &L.info2, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     }
 
-    // status - two indicators
+    // status - three indicators
     {
         auto Dot = [&](int x, int y, COLORREF c) {
             HBRUSH b = CreateSolidBrush(c);
@@ -427,24 +514,34 @@ static void Paint()
             DeleteObject(b);
         };
         int baseY = L.status.top + 3;
-        int leftX = L.status.left + 4;
-        int rightX = L.status.left + (L.status.right - L.status.left) / 2;
+        int w = (L.status.right - L.status.left) / 3;
+        int x0 = L.status.left + 4;
+        int x1 = L.status.left + w;
+        int x2 = L.status.left + w * 2;
 
         // clicker
         COLORREF clrC = isstart ? CLR_GREEN : CLR_RED;
-        Dot(leftX, baseY, clrC);
+        Dot(x0, baseY, clrC);
         SetTextColor(dc, clrC);
-        RECT rl = { leftX + 14, L.status.top, rightX - 8, L.status.bottom };
-        DrawTextW(dc, isstart ? L"\x8fde\x70b9\x5668 \x8fd0\x884c\x4e2d" : L"\x8fde\x70b9\x5668 \x5df2\x505c\x6b62",
-                  -1, &rl, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        RECT r0 = { x0 + 14, L.status.top, x1 - 6, L.status.bottom };
+        DrawTextW(dc, isstart ? L"\x8fde\x70b9 \x5f00" : L"\x8fde\x70b9 \x5173",
+                  -1, &r0, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         // multi-click
         COLORREF clrM = isMultiActive ? CLR_ACCENT : CLR_RED;
-        Dot(rightX, baseY, clrM);
+        Dot(x1, baseY, clrM);
         SetTextColor(dc, clrM);
-        RECT rr = { rightX + 14, L.status.top, L.status.right - 4, L.status.bottom };
-        DrawTextW(dc, isMultiActive ? L"\x591a\x500d\x70b9 \x8fd0\x884c\x4e2d" : L"\x591a\x500d\x70b9 \x5df2\x505c\x6b62",
-                  -1, &rr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        RECT r1 = { x1 + 14, L.status.top, x2 - 6, L.status.bottom };
+        DrawTextW(dc, isMultiActive ? L"\x591a\x500d \x5f00" : L"\x591a\x500d \x5173",
+                  -1, &r1, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+        // scroll-click
+        COLORREF clrS = isScrollClickActive ? CLR_ACCENT : CLR_RED;
+        Dot(x2, baseY, clrS);
+        SetTextColor(dc, clrS);
+        RECT r2 = { x2 + 14, L.status.top, L.status.right - 4, L.status.bottom };
+        DrawTextW(dc, isScrollClickActive ? L"\x6eda\x8f6e\x70b9 \x5f00" : L"\x6eda\x8f6e\x70b9 \x5173",
+                  -1, &r2, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     }
 }
 
@@ -503,6 +600,13 @@ static void Click(HWND hwnd, Elem e)
     switch (e) {
     case E_TGL_L: if (multimode) return; leftenabled = !leftenabled; break;
     case E_TGL_R: if (multimode) return; rightenabled = !rightenabled; break;
+    case E_BTN_SCROLL_L: scrollClickButton = 0; break;
+    case E_BTN_SCROLL_R: scrollClickButton = 1; break;
+    case E_TGL_SCROLL:
+        isScrollClickActive = !isScrollClickActive;
+        PlayScrollClickSound(isScrollClickActive);
+        ShowToggleToast(L"\x6eda\x8f6e\x70b9\x51fb", isScrollClickActive);
+        break;
     case E_BTN_KEEP: if (multimode) return; keepClicke = !keepClicke; break;
     case E_CHK_RAND:
         randomCpsEnabled = !randomCpsEnabled;
@@ -515,6 +619,12 @@ static void Click(HWND hwnd, Elem e)
     case E_MODE_R: if (!multimode) goto doModeSwitch; break;
     case E_BTN_KEY:
         for (;;) {
+            if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) {
+                if (multimode) vk_multi_key = 0;
+                else vk_key = 0;
+                g_debounceUntil = GetTickCount64() + 200;
+                SaveConfig(); Redraw(hwnd); return;
+            }
             for (int i = 1; i < 256; i++) {
                 if (GetAsyncKeyState(i) & 0x8000) {
                     if (i == 1 || i == 2) continue;
@@ -522,6 +632,23 @@ static void Click(HWND hwnd, Elem e)
                         vk_multi_key = i;
                     else
                         vk_key = i;
+                    g_debounceUntil = GetTickCount64() + 200;
+                    SaveConfig(); Redraw(hwnd); return;
+                }
+            }
+            Sleep(1);
+        }
+    case E_BTN_SCROLL_KEY:
+        for (;;) {
+            if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) {
+                vk_scroll_key = 0;
+                g_debounceUntil = GetTickCount64() + 200;
+                SaveConfig(); Redraw(hwnd); return;
+            }
+            for (int i = 1; i < 256; i++) {
+                if (GetAsyncKeyState(i) & 0x8000) {
+                    if (i == 1 || i == 2) continue;
+                    vk_scroll_key = i;
                     g_debounceUntil = GetTickCount64() + 200;
                     SaveConfig(); Redraw(hwnd); return;
                 }
@@ -626,7 +753,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
             return 0;
         }
         break;
-    case WM_KEYDOWN: if (w == VK_ESCAPE) DestroyWindow(h); return 0;
+    case WM_KEYDOWN: return 0;
     case WM_DESTROY: SaveConfig(); FreeBuf(); PostQuitMessage(0); return 0;
     }
     return DefWindowProc(h, m, w, l);

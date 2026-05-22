@@ -23,6 +23,7 @@ int leftms = 50;
 int rightms = 50;
 int vk_key = 4;
 int vk_multi_key = VK_XBUTTON2;
+int vk_scroll_key = 6;
 bool changedKey = false;
 HWND mhwnd = nullptr;
 bool isstart = false;
@@ -39,10 +40,13 @@ int multiDelayMs = 20;
 bool randomCpsEnabled = false;
 int randomCpsRange = 2;
 std::atomic<long long> g_debounceUntil{ 0 };
+bool isScrollClickActive = false;
+int scrollClickButton = 0;
 
 std::wstring getKeyName(int vk)
 {
     switch (vk) {
+    case 0:             return L"\x65e0";
     case VK_LBUTTON:   return L"\x9f20\x6807\x5de6\x952e";
     case VK_RBUTTON:   return L"\x9f20\x6807\x53f3\x952e";
     case VK_MBUTTON:   return L"\x9f20\x6807\x4e2d\x952e";
@@ -86,7 +90,38 @@ static LRESULT CALLBACK MultiClickHookProc(int nCode, WPARAM wParam, LPARAM lPar
     if (p->flags & LLMHF_INJECTED)
         return CallNextHookEx(nullptr, nCode, wParam, lParam);
 
-    if (!isMultiActive || multiMul <= 1)
+    bool hasMulti = isMultiActive && multiMul > 1;
+    bool hasScroll = isScrollClickActive;
+
+    if (!hasMulti && !hasScroll)
+        return CallNextHookEx(nullptr, nCode, wParam, lParam);
+
+    // scroll-to-click: convert scroll wheel to click
+    if (hasScroll && wParam == WM_MOUSEWHEEL) {
+        HWND target = GetForegroundWindow();
+        if (target) {
+            wchar_t cls[64];
+            if (!(GetClassNameW(target, cls, 64) && wcscmp(cls, L"ACgdi") == 0)) {
+                POINT pt = p->pt;
+                ScreenToClient(target, &pt);
+                LPARAM lp = MAKELPARAM(pt.x, pt.y);
+                bool isLeft = (scrollClickButton == 0);
+                UINT msgDown = isLeft ? WM_LBUTTONDOWN : WM_RBUTTONDOWN;
+                UINT msgUp = isLeft ? WM_LBUTTONUP : WM_RBUTTONUP;
+                WPARAM wpDown = isLeft ? MK_LBUTTON : MK_RBUTTON;
+                std::thread([target, msgDown, msgUp, wpDown, lp]() {
+                    typedef int(WINAPI* pPostMsg)(HWND, UINT, WPARAM, LPARAM);
+                    pPostMsg PostMsgA = (pPostMsg)GetProcAddress(LoadLibraryA("User32.dll"), "PostMessageA");
+                    if (!PostMsgA) return;
+                    PostMsgA(target, msgDown, wpDown, lp);
+                    PostMsgA(target, msgUp, 0, lp);
+                }).detach();
+            }
+        }
+        return 1;
+    }
+
+    if (!hasMulti)
         return CallNextHookEx(nullptr, nCode, wParam, lParam);
 
     bool isLeftDown = (wParam == WM_LBUTTONDOWN);
@@ -163,6 +198,8 @@ void ClickerThreadProc()
 
     static std::atomic<bool> busyMulti{ false };
     static std::atomic<bool> busyKey{ false };
+    static std::atomic<bool> busyPM{ false };
+    static std::atomic<bool> busyScroll{ false };
 
     bool prevMulti = false;
     bool prevStart = false;
@@ -191,7 +228,7 @@ void ClickerThreadProc()
         }
 
         // multi-click hotkey - edge detect + async wait-release
-        bool curMulti = (GetAsyncKeyState(vk_multi_key) & 0x8000) != 0;
+        bool curMulti = vk_multi_key && (GetAsyncKeyState(vk_multi_key) & 0x8000) != 0;
         if (curMulti && !prevMulti && !busyMulti.exchange(true)) {
             std::thread([]() {
                 while (GetAsyncKeyState(vk_multi_key) & 0x8000) Sleep(1);
@@ -205,7 +242,7 @@ void ClickerThreadProc()
         prevMulti = curMulti;
 
         // auto-clicker hotkey - edge detect + async wait-release
-        bool curStart = (GetAsyncKeyState(vk_key) & 0x8000) != 0;
+        bool curStart = vk_key && (GetAsyncKeyState(vk_key) & 0x8000) != 0;
         if (curStart && !prevStart && !busyKey.exchange(true)) {
             std::thread([]() {
                 while (GetAsyncKeyState(vk_key) & 0x8000) Sleep(1);
@@ -224,6 +261,44 @@ void ClickerThreadProc()
             }).detach();
         }
         prevStart = curStart;
+
+        // scroll-to-click hotkey - edge detect + async wait-release
+        bool curScroll = vk_scroll_key && (GetAsyncKeyState(vk_scroll_key) & 0x8000) != 0;
+        {
+            static bool prevScroll = false;
+            if (curScroll && !prevScroll && !busyScroll.exchange(true)) {
+                std::thread([]() {
+                    while (GetAsyncKeyState(vk_scroll_key) & 0x8000) Sleep(1);
+                    isScrollClickActive = !isScrollClickActive;
+                    PlayScrollClickSound(isScrollClickActive);
+                    ShowToggleToast(L"\x6eda\x8f6e\x70b9\x51fb", isScrollClickActive);
+                    SaveConfig();
+                    busyScroll = false;
+                }).detach();
+            }
+            prevScroll = curScroll;
+        }
+
+        // +/- keys adjust multi-click multiplier
+        {
+            bool plus = (GetAsyncKeyState(VK_OEM_PLUS) & 0x8000) != 0;
+            bool minus = (GetAsyncKeyState(VK_OEM_MINUS) & 0x8000) != 0;
+            bool numPlus = (GetAsyncKeyState(VK_ADD) & 0x8000) != 0;
+            bool numMinus = (GetAsyncKeyState(VK_SUBTRACT) & 0x8000) != 0;
+            if ((plus || minus || numPlus || numMinus) && !busyPM.exchange(true)) {
+                bool inc = (plus || numPlus);
+                std::thread([inc]() {
+                    while ((GetAsyncKeyState(VK_OEM_PLUS) & 0x8000) ||
+                           (GetAsyncKeyState(VK_OEM_MINUS) & 0x8000) ||
+                           (GetAsyncKeyState(VK_ADD) & 0x8000) ||
+                           (GetAsyncKeyState(VK_SUBTRACT) & 0x8000)) Sleep(1);
+                    if (inc) { if (multiMul < 5) multiMul++; }
+                    else { if (multiMul > 1) multiMul--; }
+                    SaveConfig();
+                    busyPM = false;
+                }).detach();
+            }
+        }
 
         if (isMultiActive) {
             leftSt = CS_IDLE; rightSt = CS_IDLE;
@@ -273,6 +348,8 @@ void ClickerThreadProc()
         } else {
             rightSt = CS_IDLE;
         }
+
+        Sleep(1);
 
         Sleep(1);
     }

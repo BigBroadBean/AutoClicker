@@ -24,3 +24,8 @@ void PlayMultiClickSound(bool enabled)
 {
     PlayMediaSound(enabled ? L"Windows Hardware Insert.wav" : L"Windows Hardware Remove.wav");
 }
+
+void PlayScrollClickSound(bool enabled)
+{
+    PlayMediaSound(enabled ? L"Windows Notify.wav" : L"Windows Notify Calendar.wav");
+}

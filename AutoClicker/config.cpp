@@ -50,6 +50,10 @@ void LoadConfig()
         multiMul = v;
     if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1 && v >= 1 && v <= 200)
         multiDelayMs = v;
+    if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1 && v >= 1 && v <= 255)
+        vk_scroll_key = v;
+    if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1)
+        scrollClickButton = (v != 0) ? 1 : 0;
 
     leftms = cpsToMs(cpsLeft10);
     rightms = cpsToMs(cpsRight10);
@@ -71,5 +75,7 @@ void SaveConfig()
          << (keepClicke ? 1 : 0) << "\n"
          << vk_multi_key << "\n"
          << multiMul << "\n"
-         << multiDelayMs << "\n";
+         << multiDelayMs << "\n"
+         << vk_scroll_key << "\n"
+         << scrollClickButton << "\n";
 }

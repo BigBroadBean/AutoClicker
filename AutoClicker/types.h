@@ -3,7 +3,7 @@
 #include <Windows.h>
 
 constexpr int WIN_W = 480;
-constexpr int WIN_H = 720;
+constexpr int WIN_H = 800;
 
 constexpr int CPS_MIN10 = 5;
 constexpr int CPS_MAX10 = 1000;

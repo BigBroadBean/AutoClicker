@@ -29,3 +29,8 @@ void PlayScrollClickSound(bool enabled)
 {
     PlayMediaSound(enabled ? L"Windows Notify.wav" : L"Windows Notify Calendar.wav");
 }
+
+void PlayScrollLRSound()
+{
+    PlayMediaSound(L"Windows Navigation Start.wav");
+}

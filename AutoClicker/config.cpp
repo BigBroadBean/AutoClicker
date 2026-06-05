@@ -54,6 +54,10 @@ void LoadConfig()
         vk_scroll_key = v;
     if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1)
         scrollClickButton = (v != 0) ? 1 : 0;
+    if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1 && v >= 1 && v <= 255)
+        vk_scroll_lr_key = v;
+    if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1)
+        g_theme = (v != 0) ? Theme::Light : Theme::Dark;
 
     leftms = cpsToMs(cpsLeft10);
     rightms = cpsToMs(cpsRight10);
@@ -77,5 +81,7 @@ void SaveConfig()
          << multiMul << "\n"
          << multiDelayMs << "\n"
          << vk_scroll_key << "\n"
-         << scrollClickButton << "\n";
+         << scrollClickButton << "\n"
+         << vk_scroll_lr_key << "\n"
+         << (g_theme == Theme::Light ? 1 : 0) << "\n";
 }

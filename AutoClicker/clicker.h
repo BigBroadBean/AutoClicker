@@ -1,5 +1,6 @@
 #pragma once
 
+#include "types.h"
 #include <Windows.h>
 #include <string>
 #include <atomic>
@@ -12,6 +13,7 @@ extern int rightms;
 extern int vk_key;
 extern int vk_multi_key;
 extern int vk_scroll_key;
+extern int vk_scroll_lr_key;
 extern bool changedKey;
 extern HWND mhwnd;
 extern bool isstart;

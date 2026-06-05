@@ -4,7 +4,7 @@
 
 void ApplyWin11Style(HWND hwnd)
 {
-    BOOL dark = TRUE;
+    BOOL dark = (g_theme == Theme::Dark) ? TRUE : FALSE;
     DwmSetWindowAttribute(hwnd, (DWMWINDOWATTRIBUTE)DWMA_DARK, &dark, sizeof(dark));
     int val = CORNER_ROUND;
     DwmSetWindowAttribute(hwnd, (DWMWINDOWATTRIBUTE)DWMA_CORNER, &val, sizeof(val));

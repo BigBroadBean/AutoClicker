@@ -1,5 +1,4 @@
 #include "clicker.h"
-#include "types.h"
 #include "config.h"
 #include "sound.h"
 #include "overlay.h"
@@ -16,6 +15,7 @@
 
 using namespace std::chrono;
 
+Theme g_theme = Theme::Dark;
 int cpsLeft10 = 100;
 int cpsRight10 = 100;
 int cpsMax = 50;
@@ -24,6 +24,7 @@ int rightms = 50;
 int vk_key = 4;
 int vk_multi_key = VK_XBUTTON2;
 int vk_scroll_key = 6;
+int vk_scroll_lr_key = VK_XBUTTON1;
 bool changedKey = false;
 HWND mhwnd = nullptr;
 bool isstart = false;
@@ -277,6 +278,24 @@ void ClickerThreadProc()
                 }).detach();
             }
             prevScroll = curScroll;
+        }
+
+        // scroll L/R toggle hotkey - edge detect + async wait-release
+        {
+            static std::atomic<bool> busyScrollLR{ false };
+            static bool prevScrollLR = false;
+            bool curScrollLR = vk_scroll_lr_key && (GetAsyncKeyState(vk_scroll_lr_key) & 0x8000) != 0;
+            if (curScrollLR && !prevScrollLR && !busyScrollLR.exchange(true)) {
+                std::thread([]() {
+                    while (GetAsyncKeyState(vk_scroll_lr_key) & 0x8000) Sleep(1);
+                    scrollClickButton = (scrollClickButton == 0) ? 1 : 0;
+                    PlayScrollLRSound();
+                    ShowScrollLRToast(scrollClickButton);
+                    SaveConfig();
+                    busyScrollLR = false;
+                }).detach();
+            }
+            prevScrollLR = curScrollLR;
         }
 
         // +/- keys adjust multi-click multiplier

@@ -58,6 +58,12 @@ void LoadConfig()
         vk_scroll_lr_key = v;
     if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1)
         g_theme = (v != 0) ? Theme::Light : Theme::Dark;
+    if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1)
+        autoStopEnabled = (v != 0);
+    if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1 && v >= 1 && v <= 3600)
+        autoStopSeconds = v;
+    if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1)
+        topmost = (v != 0);
 
     leftms = cpsToMs(cpsLeft10);
     rightms = cpsToMs(cpsRight10);
@@ -83,5 +89,8 @@ void SaveConfig()
          << vk_scroll_key << "\n"
          << scrollClickButton << "\n"
          << vk_scroll_lr_key << "\n"
-         << (g_theme == Theme::Light ? 1 : 0) << "\n";
+         << (g_theme == Theme::Light ? 1 : 0) << "\n"
+         << (autoStopEnabled ? 1 : 0) << "\n"
+         << autoStopSeconds << "\n"
+         << (topmost ? 1 : 0) << "\n";
 }

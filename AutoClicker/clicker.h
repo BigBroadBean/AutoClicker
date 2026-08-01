@@ -5,6 +5,7 @@
 #include <string>
 #include <atomic>
 
+// ---- auto-clicker state ----
 extern int cpsLeft10;
 extern int cpsRight10;
 extern int cpsMax;
@@ -23,31 +24,38 @@ extern bool keepClicke;
 extern bool flag;
 extern POINT point;
 
-extern bool multimode;
+// ---- multi-click mode ----
 extern bool isMultiActive;
-extern bool isScrollClickActive;
 extern int multiMul;
 extern int multiDelayMs;
-extern bool randomCpsEnabled;
-extern int randomCpsRange;
-extern int scrollClickButton;
-extern std::atomic<long long> g_debounceUntil;
-extern bool keepClicke;
-extern bool flag;
-extern POINT point;
 
-extern bool multimode;
-extern bool isMultiActive;
-extern int multiMul;
-extern int multiDelayMs;
+// ---- scroll-to-click ----
+extern bool isScrollClickActive;
+extern int scrollClickButton;
+
+// ---- random CPS ----
 extern bool randomCpsEnabled;
 extern int randomCpsRange;
+
+// ---- auto-stop timer ----
+extern bool autoStopEnabled;
+extern int autoStopSeconds;
+
+// ---- window ----
+extern bool topmost;
+
+// ---- misc ----
+extern std::atomic<long long> g_clickCount;
 extern std::atomic<long long> g_debounceUntil;
 
 std::wstring getKeyName(int vk);
 void udmWindow();
 void ClickerThreadProc();
 void StartMultiClickHook();
+
+// realtime CPS: record every click, then query clicks in the last second
+void RecordClick();
+int GetRealtimeCps();
 
 inline int cpsToMs(int cps10) {
     float cps = cps10 / 10.0f;

@@ -7,15 +7,13 @@
 #include <thread>
 #include <chrono>
 #include <string>
-#include <cstdlib>
-#include <ctime>
 #include <atomic>
 
 #pragma comment(lib, "winmm.lib")
 
 using namespace std::chrono;
 
-Theme g_theme = Theme::Dark;
+Theme g_theme = Theme::Light;
 int cpsLeft10 = 100;
 int cpsRight10 = 100;
 int cpsMax = 50;
@@ -34,7 +32,6 @@ bool keepClicke = false;
 bool flag = false;
 POINT point = {};
 
-bool multimode = false;
 bool isMultiActive = false;
 int multiMul = 1;
 int multiDelayMs = 20;
@@ -43,6 +40,46 @@ int randomCpsRange = 2;
 std::atomic<long long> g_debounceUntil{ 0 };
 bool isScrollClickActive = false;
 int scrollClickButton = 0;
+
+bool autoStopEnabled = false;
+int autoStopSeconds = 30;
+bool topmost = false;
+std::atomic<long long> g_clickCount{ 0 };
+
+// ---- realtime CPS: ring buffer of click timestamps (ns) ----
+static constexpr int kCpsWindow = 1024;   // enough for 500+ CPS over 1s
+static std::atomic<long long> s_clickStamp[kCpsWindow];
+static std::atomic<int> s_clickHead{ 0 };
+static std::atomic<int> s_clickFilled{ 0 };
+
+void RecordClick()
+{
+    long long ns = duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count();
+    int h = s_clickHead.load(std::memory_order_relaxed);
+    s_clickStamp[h].store(ns, std::memory_order_relaxed);
+    s_clickHead.store((h + 1) % kCpsWindow, std::memory_order_relaxed);
+    int f = s_clickFilled.load(std::memory_order_relaxed);
+    if (f < kCpsWindow)
+        s_clickFilled.store(f + 1, std::memory_order_relaxed);
+    g_clickCount++;
+}
+
+int GetRealtimeCps()
+{
+    long long nowNs = duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count();
+    int f = s_clickFilled.load(std::memory_order_relaxed);
+    if (f <= 0) return 0;
+    int h = s_clickHead.load(std::memory_order_relaxed);
+    int n = f < kCpsWindow ? f : kCpsWindow;
+    int cnt = 0;
+    for (int i = 0; i < n; i++) {
+        int idx = h - 1 - i;
+        if (idx < 0) idx += kCpsWindow;
+        if (nowNs - s_clickStamp[idx].load(std::memory_order_relaxed) <= 1000000000LL) cnt++;
+        else break;   // timestamps are monotonic, older ones are even older
+    }
+    return cnt;
+}
 
 std::wstring getKeyName(int vk)
 {
@@ -182,15 +219,45 @@ void StartMultiClickHook()
     }).detach();
 }
 
+// high-precision wait: coarse Sleep + fine spin for sub-millisecond accuracy.
+// when precise, the final <=1.5ms stretch is a low-power spin so click timing
+// error stays well below 0.1ms (steady_clock resolution ~100ns).
+static void PreciseSleepUntil(steady_clock::time_point target, bool precise)
+{
+    for (;;) {
+        auto remain = target - steady_clock::now();
+        if (remain <= steady_clock::duration::zero()) return;
+        long long us = duration_cast<microseconds>(remain).count();
+        if (us > 8000) {
+            Sleep((DWORD)((us - 2000) / 1000));     // coarse, wake ~2ms early
+        } else if (us > 1500) {
+            Sleep(1);                                 // 1ms timer granularity
+        } else if (precise) {
+            while (steady_clock::now() < target) YieldProcessor();  // final spin
+            return;
+        } else {
+            Sleep(1);                                 // idle: true sleep, never spin
+        }
+    }
+}
+
 void ClickerThreadProc()
 {
     typedef int(WINAPI* pPostMessageA) (HWND, UINT, WPARAM, LPARAM);
     pPostMessageA MyPostMessageA = (pPostMessageA)GetProcAddress(LoadLibraryA("User32.dll"), "PostMessageA");
-    srand((unsigned)time(nullptr));
 
-    auto randDelay = [](int baseMs, int baseCps10) -> int {
+    // xorshift64* PRNG (fast & uniform, for random CPS jitter)
+    unsigned long long rng = 0x9E3779B97F4A7C15ull ^ (unsigned long long)GetTickCount64();
+    auto rnd = [&]() -> unsigned {
+        rng ^= rng << 13;
+        rng ^= rng >> 7;
+        rng ^= rng << 17;
+        return (unsigned)(rng >> 32);
+    };
+
+    auto randDelay = [&](int baseMs, int baseCps10) -> int {
         if (!randomCpsEnabled) return baseMs;
-        int offset = (std::rand() % (randomCpsRange * 20 + 1)) - randomCpsRange * 10;
+        int offset = (int)(rnd() % (unsigned)(randomCpsRange * 20 + 1)) - randomCpsRange * 10;
         int cps10 = baseCps10 + offset;
         if (cps10 < CPS_MIN10) cps10 = CPS_MIN10;
         if (cps10 > cpsMax * 10) cps10 = cpsMax * 10;
@@ -211,6 +278,7 @@ void ClickerThreadProc()
     ClickState rightSt = CS_IDLE;
     auto nextLeftTime  = steady_clock::now();
     auto nextRightTime = steady_clock::now();
+    auto nextScan      = steady_clock::now();
     POINT lastPt = {};
 
     for (;;) {
@@ -222,114 +290,129 @@ void ClickerThreadProc()
             continue;
         }
 
-        // debounce after key rebind
-        if (GetTickCount64() < (unsigned long long)g_debounceUntil) {
-            Sleep(1);
-            continue;
-        }
+        // ---- periodic scan: hotkeys + auto-stop (every ~4ms) ----
+        if (now >= nextScan) {
+            nextScan = now + milliseconds(4);
 
-        // multi-click hotkey - edge detect + async wait-release
-        bool curMulti = vk_multi_key && (GetAsyncKeyState(vk_multi_key) & 0x8000) != 0;
-        if (curMulti && !prevMulti && !busyMulti.exchange(true)) {
-            std::thread([]() {
-                while (GetAsyncKeyState(vk_multi_key) & 0x8000) Sleep(1);
-                isMultiActive = !isMultiActive;
-                PlayMultiClickSound(isMultiActive);
-                ShowToggleToast(L"\x591a\x500d\x70b9", isMultiActive);
-                SaveConfig();
-                busyMulti = false;
-            }).detach();
-        }
-        prevMulti = curMulti;
-
-        // auto-clicker hotkey - edge detect + async wait-release
-        bool curStart = vk_key && (GetAsyncKeyState(vk_key) & 0x8000) != 0;
-        if (curStart && !prevStart && !busyKey.exchange(true)) {
-            std::thread([]() {
-                while (GetAsyncKeyState(vk_key) & 0x8000) Sleep(1);
-                isstart = !isstart;
-                if (isstart) {
-                    GetAsyncKeyState(VK_LBUTTON);
-                    GetAsyncKeyState(VK_RBUTTON);
-                    timeBeginPeriod(1);
-                } else {
-                    timeEndPeriod(1);
+            if (GetTickCount64() < (unsigned long long)g_debounceUntil) {
+                // still debouncing after a key rebind
+            } else {
+                // multi-click hotkey - edge detect + async wait-release
+                bool curMulti = vk_multi_key && (GetAsyncKeyState(vk_multi_key) & 0x8000) != 0;
+                if (curMulti && !prevMulti && !busyMulti.exchange(true)) {
+                    std::thread([]() {
+                        while (GetAsyncKeyState(vk_multi_key) & 0x8000) Sleep(1);
+                        isMultiActive = !isMultiActive;
+                        PlayMultiClickSound(isMultiActive);
+                        ShowToggleToast(L"\x591a\x500d\x70b9", isMultiActive);
+                        SaveConfig();
+                        busyMulti = false;
+                    }).detach();
                 }
-                PlayClickerSound(isstart);
-                ShowToggleToast(L"\x8fde\x70b9\x5668", isstart);
-                SaveConfig();
-                busyKey = false;
-            }).detach();
-        }
-        prevStart = curStart;
+                prevMulti = curMulti;
 
-        // scroll-to-click hotkey - edge detect + async wait-release
-        bool curScroll = vk_scroll_key && (GetAsyncKeyState(vk_scroll_key) & 0x8000) != 0;
-        {
-            static bool prevScroll = false;
-            if (curScroll && !prevScroll && !busyScroll.exchange(true)) {
-                std::thread([]() {
-                    while (GetAsyncKeyState(vk_scroll_key) & 0x8000) Sleep(1);
-                    isScrollClickActive = !isScrollClickActive;
-                    PlayScrollClickSound(isScrollClickActive);
-                    ShowToggleToast(L"\x6eda\x8f6e\x70b9\x51fb", isScrollClickActive);
-                    SaveConfig();
-                    busyScroll = false;
-                }).detach();
+                // auto-clicker hotkey - edge detect + async wait-release
+                bool curStart = vk_key && (GetAsyncKeyState(vk_key) & 0x8000) != 0;
+                if (curStart && !prevStart && !busyKey.exchange(true)) {
+                    std::thread([]() {
+                        while (GetAsyncKeyState(vk_key) & 0x8000) Sleep(1);
+                        isstart = !isstart;
+                        GetAsyncKeyState(VK_LBUTTON);
+                        GetAsyncKeyState(VK_RBUTTON);
+                        PlayClickerSound(isstart);
+                        ShowToggleToast(L"\x8fde\x70b9\x5668", isstart);
+                        SaveConfig();
+                        busyKey = false;
+                    }).detach();
+                }
+                prevStart = curStart;
+
+                // scroll-to-click hotkey - edge detect + async wait-release
+                bool curScroll = vk_scroll_key && (GetAsyncKeyState(vk_scroll_key) & 0x8000) != 0;
+                {
+                    static bool prevScroll = false;
+                    if (curScroll && !prevScroll && !busyScroll.exchange(true)) {
+                        std::thread([]() {
+                            while (GetAsyncKeyState(vk_scroll_key) & 0x8000) Sleep(1);
+                            isScrollClickActive = !isScrollClickActive;
+                            PlayScrollClickSound(isScrollClickActive);
+                            ShowToggleToast(L"\x6eda\x8f6e\x70b9\x51fb", isScrollClickActive);
+                            SaveConfig();
+                            busyScroll = false;
+                        }).detach();
+                    }
+                    prevScroll = curScroll;
+                }
+
+                // scroll L/R toggle hotkey - edge detect + async wait-release
+                {
+                    static std::atomic<bool> busyScrollLR{ false };
+                    static bool prevScrollLR = false;
+                    bool curScrollLR = vk_scroll_lr_key && (GetAsyncKeyState(vk_scroll_lr_key) & 0x8000) != 0;
+                    if (curScrollLR && !prevScrollLR && !busyScrollLR.exchange(true)) {
+                        std::thread([]() {
+                            while (GetAsyncKeyState(vk_scroll_lr_key) & 0x8000) Sleep(1);
+                            scrollClickButton = (scrollClickButton == 0) ? 1 : 0;
+                            PlayScrollLRSound();
+                            ShowScrollLRToast(scrollClickButton);
+                            SaveConfig();
+                            busyScrollLR = false;
+                        }).detach();
+                    }
+                    prevScrollLR = curScrollLR;
+                }
+
+                // +/- keys adjust multi-click multiplier
+                {
+                    bool plus = (GetAsyncKeyState(VK_OEM_PLUS) & 0x8000) != 0;
+                    bool minus = (GetAsyncKeyState(VK_OEM_MINUS) & 0x8000) != 0;
+                    bool numPlus = (GetAsyncKeyState(VK_ADD) & 0x8000) != 0;
+                    bool numMinus = (GetAsyncKeyState(VK_SUBTRACT) & 0x8000) != 0;
+                    if ((plus || minus || numPlus || numMinus) && !busyPM.exchange(true)) {
+                        bool inc = (plus || numPlus);
+                        std::thread([inc]() {
+                            while ((GetAsyncKeyState(VK_OEM_PLUS) & 0x8000) ||
+                                   (GetAsyncKeyState(VK_OEM_MINUS) & 0x8000) ||
+                                   (GetAsyncKeyState(VK_ADD) & 0x8000) ||
+                                   (GetAsyncKeyState(VK_SUBTRACT) & 0x8000)) Sleep(1);
+                            if (inc) { if (multiMul < 5) multiMul++; }
+                            else { if (multiMul > 1) multiMul--; }
+                            SaveConfig();
+                            busyPM = false;
+                        }).detach();
+                    }
+                }
+
+                // ---- auto-stop timer: stop the clicker after N seconds ----
+                {
+                    static steady_clock::time_point stopStart{};
+                    static bool stopArmed = false;
+                    if (isstart && autoStopEnabled && autoStopSeconds > 0) {
+                        if (!stopArmed) {
+                            stopStart = steady_clock::now();
+                            stopArmed = true;
+                        } else if (steady_clock::now() - stopStart >= milliseconds((long long)autoStopSeconds * 1000)) {
+                            isstart = false;
+                            PlayClickerSound(false);
+                            ShowToggleToast(L"\x8fde\x70b9\x5668", false);
+                            SaveConfig();
+                            stopArmed = false;
+                        }
+                    } else if (!isstart) {
+                        stopArmed = false;
+                    }
+                }
             }
-            prevScroll = curScroll;
         }
 
-        // scroll L/R toggle hotkey - edge detect + async wait-release
-        {
-            static std::atomic<bool> busyScrollLR{ false };
-            static bool prevScrollLR = false;
-            bool curScrollLR = vk_scroll_lr_key && (GetAsyncKeyState(vk_scroll_lr_key) & 0x8000) != 0;
-            if (curScrollLR && !prevScrollLR && !busyScrollLR.exchange(true)) {
-                std::thread([]() {
-                    while (GetAsyncKeyState(vk_scroll_lr_key) & 0x8000) Sleep(1);
-                    scrollClickButton = (scrollClickButton == 0) ? 1 : 0;
-                    PlayScrollLRSound();
-                    ShowScrollLRToast(scrollClickButton);
-                    SaveConfig();
-                    busyScrollLR = false;
-                }).detach();
-            }
-            prevScrollLR = curScrollLR;
-        }
+        // ---- click state machine (sub-millisecond timing) ----
+        if (isMultiActive) { leftSt = CS_IDLE; rightSt = CS_IDLE; }
 
-        // +/- keys adjust multi-click multiplier
-        {
-            bool plus = (GetAsyncKeyState(VK_OEM_PLUS) & 0x8000) != 0;
-            bool minus = (GetAsyncKeyState(VK_OEM_MINUS) & 0x8000) != 0;
-            bool numPlus = (GetAsyncKeyState(VK_ADD) & 0x8000) != 0;
-            bool numMinus = (GetAsyncKeyState(VK_SUBTRACT) & 0x8000) != 0;
-            if ((plus || minus || numPlus || numMinus) && !busyPM.exchange(true)) {
-                bool inc = (plus || numPlus);
-                std::thread([inc]() {
-                    while ((GetAsyncKeyState(VK_OEM_PLUS) & 0x8000) ||
-                           (GetAsyncKeyState(VK_OEM_MINUS) & 0x8000) ||
-                           (GetAsyncKeyState(VK_ADD) & 0x8000) ||
-                           (GetAsyncKeyState(VK_SUBTRACT) & 0x8000)) Sleep(1);
-                    if (inc) { if (multiMul < 5) multiMul++; }
-                    else { if (multiMul > 1) multiMul--; }
-                    SaveConfig();
-                    busyPM = false;
-                }).detach();
-            }
-        }
+        bool leftActive = isstart && leftenabled && mhwnd != nullptr && !isMultiActive;
+        bool rightActive = isstart && rightenabled && mhwnd != nullptr && !isMultiActive;
 
-        if (isMultiActive) {
-            leftSt = CS_IDLE; rightSt = CS_IDLE;
-            Sleep(1);
-            continue;
-        }
-
-        bool leftActive = isstart && leftenabled && mhwnd != nullptr;
-        bool rightActive = isstart && rightenabled && mhwnd != nullptr;
-
-        // left click state machine
-        if ((leftActive && (GetAsyncKeyState(VK_LBUTTON) & 0x8000)) || (leftActive && keepClicke)) {
+        bool leftHeld = leftActive && ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) || keepClicke);
+        if (leftHeld) {
             if (now >= nextLeftTime) {
                 GetCursorPos(&lastPt);
                 ScreenToClient(mhwnd, &lastPt);
@@ -337,6 +420,7 @@ void ClickerThreadProc()
                 if (leftSt != CS_WAIT_UP) {
                     MyPostMessageA(mhwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp);
                     leftSt = CS_WAIT_UP;
+                    RecordClick();
                 } else {
                     MyPostMessageA(mhwnd, WM_LBUTTONUP, 0, lp);
                     leftSt = CS_IDLE;
@@ -348,8 +432,8 @@ void ClickerThreadProc()
             leftSt = CS_IDLE;
         }
 
-        // right click state machine
-        if ((rightActive && (GetAsyncKeyState(VK_RBUTTON) & 0x8000)) || (rightActive && keepClicke)) {
+        bool rightHeld = rightActive && ((GetAsyncKeyState(VK_RBUTTON) & 0x8000) || keepClicke);
+        if (rightHeld) {
             if (now >= nextRightTime) {
                 GetCursorPos(&lastPt);
                 ScreenToClient(mhwnd, &lastPt);
@@ -357,6 +441,7 @@ void ClickerThreadProc()
                 if (rightSt != CS_WAIT_UP) {
                     MyPostMessageA(mhwnd, WM_RBUTTONDOWN, MK_RBUTTON, lp);
                     rightSt = CS_WAIT_UP;
+                    RecordClick();
                 } else {
                     MyPostMessageA(mhwnd, WM_RBUTTONUP, 0, lp);
                     rightSt = CS_IDLE;
@@ -368,8 +453,12 @@ void ClickerThreadProc()
             rightSt = CS_IDLE;
         }
 
-        Sleep(1);
-
-        Sleep(1);
+        // ---- precise wait until the next event ----
+        auto next = nextScan;
+        if (leftHeld  && nextLeftTime  < next) next = nextLeftTime;
+        if (rightHeld && nextRightTime < next) next = nextRightTime;
+        if (next > now) {
+            PreciseSleepUntil(next, leftHeld || rightHeld);
+        }
     }
 }

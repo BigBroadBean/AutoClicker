@@ -48,6 +48,8 @@ Or build from command line:
 msbuild AutoClicker.sln /p:Configuration=Release /p:Platform=x64
 ```
 
+Building requires `MCCanAttackJni.dll` in the repository root (a PreBuildEvent copies it into the project dir and it is embedded into the exe as an RCDATA resource).
+
 ## Usage
 
 - **Sidebar**: click the icons to switch pages (Click / Multi / Scroll / Advanced), or use arrow keys
@@ -57,7 +59,8 @@ msbuild AutoClicker.sln /p:Configuration=Release /p:Platform=x64
 - **Advanced page**: CPS limit, random CPS, auto-stop timer
 - **Hotkeys**: click a hotkey button, then press any key to bind (Esc cancels)
 - **Attack-only gate**: toggle on the Click page (row 3); when on, only the LEFT button pauses unless the targeted entity is attackable (right button is unaffected). Status bar has a 4th indicator (green=attackable, red=not, dim=no game data) and the Click page shows a live 可攻击/不可攻击/未连接 chip; bindable hotkey. Fail-safe: no UDP data (game closed / DLL missing) is treated as “cannot attack”
-- **Auto-injection**: after the attack-only gate is enabled, a background loop (1s period) scans javaw/java processes and injects MCCanAttackJni.dll into every Minecraft Java client not yet injected (identified by GLFW30/LWJGL window class, x64 only, no double injection, re-injects after game restarts); **nothing is injected while the feature is off**. Note: NetEase China Edition (game box) has anti-cheat protection - injection is detected and the game gets terminated, so the feature does not work there. **MCCanAttackJni.dll** must sit next to the exe (or in the working directory)
+- **Auto-injection**: after the attack-only gate is enabled, a background loop (1s period) scans javaw/java processes and injects MCCanAttackJni.dll into every Minecraft Java client not yet injected (identified by GLFW30/LWJGL window class, x64 only, no double injection, re-injects after game restarts); **nothing is injected while the feature is off**. Note: NetEase China Edition (game box) has anti-cheat protection - injection is detected and the game gets terminated, so the feature does not work there
+- **Single-file distribution**: MCCanAttackJni.dll is embedded into the exe and auto-extracted to `%TEMP%\AutoClicker\` at startup; a sidecar DLL next to the exe takes priority when present (for DLL updates)
 - **Counter**: shows total clicks of the session; click it to reset
 
 ## License

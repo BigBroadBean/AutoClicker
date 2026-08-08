@@ -48,6 +48,8 @@
 msbuild AutoClicker.sln /p:Configuration=Release /p:Platform=x64
 ```
 
+构建需要仓库根目录存在 `MCCanAttackJni.dll`（PreBuildEvent 会自动复制到项目目录并作为 RCDATA 资源嵌入 exe）。
+
 ## 使用说明
 
 - **侧边栏**：点击左侧图标切换页面（连点 / 多倍 / 滚轮 / 高级），也可用方向键切换
@@ -57,7 +59,8 @@ msbuild AutoClicker.sln /p:Configuration=Release /p:Platform=x64
 - **高级页**：CPS 上限、随机 CPS、定时自动停止
 - **快捷键**：点击快捷键按钮绑定按键（按 Esc 取消），用于启停对应功能
 - **仅能攻击时连点**：连点页第三行开关；开启后**仅左键**在准星对准可攻击目标时才连点（右键照常），状态栏第 4 个指示灯实时显示 0/1，连点页有 可攻击/不可攻击/未连接 状态芯片，可绑快捷键；DLL 缺失/游戏未运行时按“不可攻击”处理（fail-safe）
-- **自动注入**：开启「仅能攻击时连点」后后台循环扫描 javaw/java 进程（1 秒周期），自动把 MCCanAttackJni.dll 注入所有未注入的我的世界 Java 版进程（窗口类 GLFW30/LWJGL 识别，仅 x64，不重复注入，进程重启后重新注入）；**功能关闭时不注入任何进程**。注意：网易中国版（游戏盒子）有反作弊保护，注入会被检测并导致游戏关闭，无法使用本功能。需要将 **MCCanAttackJni.dll** 放在程序同目录（或当前目录）
+- **自动注入**：开启「仅能攻击时连点」后后台循环扫描 javaw/java 进程（1 秒周期），自动把 MCCanAttackJni.dll 注入所有未注入的我的世界 Java 版进程（窗口类 GLFW30/LWJGL 识别，仅 x64，不重复注入，进程重启后重新注入）；**功能关闭时不注入任何进程**。注意：网易中国版（游戏盒子）有反作弊保护，注入会被检测并导致游戏关闭，无法使用本功能
+- **单文件分发**：MCCanAttackJni.dll 已内嵌进 exe，启动时自动释放到 `%TEMP%\AutoClicker\`，无需手动放置；若 exe 同目录存在 MCCanAttackJni.dll 则优先使用（便于更新 DLL）
 - **计数**：状态栏右下角显示本次会话点击总数，点击可重置
 
 ## 许可证

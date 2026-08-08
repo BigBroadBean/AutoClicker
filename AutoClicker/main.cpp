@@ -676,7 +676,7 @@ static void Paint()
         RECT vr = { tr.left, tr.top + 26, tr.right, tr.bottom };
         SetTextColor(dc, TXT_DIM());
         SelectObject(dc, g_hfSmall);
-        DrawTextW(dc, L"v2.2", -1, &vr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextW(dc, L"v2.3", -1, &vr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     }
 
     // ---- pin / theme buttons (with hover hints) ----

@@ -9,6 +9,8 @@
 #include <psapi.h>
 #include <shlobj.h>
 
+#include "resource.h"
+
 #include <thread>
 #include <set>
 #include <cstring>
@@ -133,7 +135,34 @@ static void EnableDebugPrivilege()
     }
 }
 
-// resolve the DLL path: exe directory first, then the working directory
+// extract MCCanAttackJni.dll from the embedded RCDATA resource into
+// %TEMP%\AutoClicker\ so a single exe is enough to run (no sidecar DLL)
+static bool ExtractEmbeddedDll()
+{
+    HRSRC hr = FindResourceA(nullptr, MAKEINTRESOURCEA(IDR_MC_DLL), RT_RCDATA);
+    if (!hr) return false;
+    HGLOBAL hg = LoadResource(nullptr, hr);
+    if (!hg) return false;
+    void* p = LockResource(hg);
+    DWORD sz = SizeofResource(nullptr, hr);
+    if (!p || sz == 0) return false;
+
+    char path[MAX_PATH] = {};
+    if (!GetTempPathA(MAX_PATH, path)) return false;
+    strcat_s(path, "AutoClicker");
+    CreateDirectoryA(path, nullptr);
+    strcat_s(path, "\\MCCanAttackJni.dll");
+
+    HANDLE f = CreateFileA(path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    DWORD written = 0;
+    WriteFile(f, p, sz, &written, nullptr);
+    CloseHandle(f);
+    return written == sz;
+}
+
+// resolve the DLL path: exe directory -> working directory -> embedded copy
 static bool ResolveDllPath(char* out, SIZE_T cap)
 {
     char path[MAX_PATH] = {};
@@ -152,6 +181,14 @@ static bool ResolveDllPath(char* out, SIZE_T cap)
     if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
         strncpy_s(out, cap, path, _TRUNCATE);
         return true;
+    }
+    // 3. embedded copy extracted to %TEMP%\AutoClicker
+    if (GetTempPathA(MAX_PATH, path)) {
+        strcat_s(path, "AutoClicker\\MCCanAttackJni.dll");
+        if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
+            strncpy_s(out, cap, path, _TRUNCATE);
+            return true;
+        }
     }
     return false;
 }
@@ -294,6 +331,7 @@ void StartInjectorThread()
 {
     std::thread([]() {
         EnableDebugPrivilege();
+        ExtractEmbeddedDll();   // ensure the temp copy exists for injection
 
         char dllPath[MAX_PATH] = {};
         if (!ResolveDllPath(dllPath, MAX_PATH)) {

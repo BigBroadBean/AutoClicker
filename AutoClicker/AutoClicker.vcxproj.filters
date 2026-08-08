@@ -15,6 +15,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="canattack.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
     <ClInclude Include="clicker.h">
       <Filter>头文件</Filter>
     </ClInclude>
@@ -38,6 +41,9 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="canattack.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
     <ClCompile Include="clicker.cpp">
       <Filter>源文件</Filter>
     </ClCompile>

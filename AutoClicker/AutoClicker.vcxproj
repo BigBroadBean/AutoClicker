@@ -137,6 +137,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="canattack.h" />
     <ClInclude Include="clicker.h" />
     <ClInclude Include="config.h" />
     <ClInclude Include="overlay.h" />
@@ -146,6 +147,7 @@
     <ClInclude Include="ui.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="canattack.cpp" />
     <ClCompile Include="clicker.cpp" />
     <ClCompile Include="config.cpp" />
     <ClCompile Include="main.cpp" />

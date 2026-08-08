@@ -19,6 +19,7 @@ A lightweight Windows auto-clicker with a **sidebar navigation + Neumorphism UI*
 - **Multi-click mode** with configurable multiplier (1-5x) and delay (1-200ms), plus 2x/3x/4x/5x and 10/25/50/100ms presets
 - **Scroll-to-click**: converts wheel scrolls into left/right clicks
 - **Random CPS** jitter to mimic human behavior
+- **Attack-only clicking** (accessory of the direct clicker): auto-injects MCCanAttackJni.dll into Minecraft Java processes and reads the live “can attack the targeted entity” state (0/1) via UDP port 35785 (5ms updates); when enabled, the clicker only clicks while an attack is possible, otherwise it behaves as before. Supported versions: **1.8.9 / 1.12.2 / 1.20.1 (incl. their Forge versions)**
 - **CPS limit** to prevent clicking too fast (type a value directly)
 - **Auto-stop timer**: stops the clicker after N seconds
 - **Realtime CPS readout**: bottom-right chip shows the live click rate (1s sliding window)
@@ -55,6 +56,8 @@ msbuild AutoClicker.sln /p:Configuration=Release /p:Platform=x64
 - **Scroll page**: scroll-click toggle + left/right selector + two hotkeys
 - **Advanced page**: CPS limit, random CPS, auto-stop timer
 - **Hotkeys**: click a hotkey button, then press any key to bind (Esc cancels)
+- **Attack-only gate**: toggle on the Click page (row 3); when on, only the LEFT button pauses unless the targeted entity is attackable (right button is unaffected). Status bar has a 4th indicator (green=attackable, red=not, dim=no game data) and the Click page shows a live 可攻击/不可攻击/未连接 chip; bindable hotkey. Fail-safe: no UDP data (game closed / DLL missing) is treated as “cannot attack”
+- **Auto-injection**: after the attack-only gate is enabled, a background loop (1s period) scans javaw/java processes and injects MCCanAttackJni.dll into every Minecraft Java client not yet injected (identified by GLFW30/LWJGL window class, x64 only, no double injection, re-injects after game restarts); **nothing is injected while the feature is off**. Note: NetEase China Edition (game box) has anti-cheat protection - injection is detected and the game gets terminated, so the feature does not work there. **MCCanAttackJni.dll** must sit next to the exe (or in the working directory)
 - **Counter**: shows total clicks of the session; click it to reset
 
 ## License

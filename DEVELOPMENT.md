@@ -14,6 +14,7 @@
 |---|---|
 | `main.cpp` | 主窗口、GDI 自绘 UI（新拟态）、布局、命中测试、输入处理 |
 | `clicker.cpp` | 连点核心线程、精确计时、热键检测、多倍点击 Hook、实时 CPS 统计 |
+| `canattack.cpp` | 仅能攻击时连点：UDP 监听线程（35785 端口，5ms 循环）、Minecraft Java 进程自动注入线程、反重复注入 |
 | `config.cpp` | 配置读写（`%APPDATA%\AutoClicker\autoclickerSave.txt`，追加式、向后兼容） |
 | `overlay.cpp` | Toast 通知（无边框分层窗口，逐像素 Alpha + 新拟态样式） |
 | `sound.cpp` | 系统提示音（`PlaySoundW`，Windows Media 目录 wav） |
@@ -35,6 +36,8 @@
 | 连点线程 | 热键扫描 + 精确点击计时 | 4ms 热键扫描周期；亚毫秒点击定时 |
 | Hook 线程 | `WH_MOUSE_LL` 全局鼠标钩子 | 多倍点击、滚轮转点击；`GetMessageW` 阻塞零开销 |
 | Toast 线程 | 一次性通知动画 | detach，自清理 |
+| 注入线程 | 扫描 javaw/java 进程，向未注入的 MC 客户端注入 DLL | 1s 周期；功能关闭时完全不注入 |
+| UDP 监听线程 | 绑定 127.0.0.1:35785，接收 0/1 可攻击状态 | 5ms 循环，SO_RCVTIMEO 25ms |
 
 ### 连点线程循环结构
 
@@ -315,7 +318,33 @@ msbuild AutoClicker.sln /p:Configuration=Debug   /p:Platform=x64
 | 实时 CPS | 状态栏右下 | 1 秒滑动窗口 |
 | 窗口置顶 / 主题 | 标题栏 | 图钉 / ☀☾，hover 有提示 |
 
-## 11. 未来改进方向
+## 11. 仅能攻击时连点（MCCanAttackJni 联动）
+
+### 协议（已通过反汇编确认）
+
+- `MCCanAttackJni.dll`（MinGW x64 JNI）被注入后通过 `JNI_GetCreatedJavaVMs` 附加 JVM，反射查找 `Minecraft.hitResult`（新旧映射名兼容，`func_71410_x`/`m_91087_` 等）
+- 判定结果写入状态结构 offset 0x14，循环 `Sleep(5)` 后 `sendto` 到 `127.0.0.1:35785`，载荷 1 字节：`'0'`(0x30) 不可攻击 / `'1'`(0x31) 可攻击
+- 另有共享内存 `Local\MCCanAttackStatus_<游戏PID>` 备用通道（未使用）
+
+### 本程序实现
+
+- **UDP 监听**：`canattack.cpp` 绑定 `127.0.0.1:35785`（仅回环），`SO_RCVTIMEO=25ms`，每轮 `Sleep(5)` 后 `recvfrom`；校验源地址为回环、载荷为 0/1 才更新 `g_canAttack`；无新包 300ms 后回落到 0（fail-safe，宁可不点不可误点）
+- **门控**：`clicker.cpp` 中 `canAtkGate = !canAttackOnlyClick || g_canAttack == 1`，左右键 `leftActive/rightActive` 加门控；门控在点击半途关闭时立即补发 UP（防止目标窗口卡按键）
+- **注入线程**（反注入要点）：
+  - 先 `SeDebugPrivilege`（应对游戏以管理员运行）
+  - 只认 `javaw.exe`/`java.exe` + 拥有 `GLFW30`/`LWJGL` 窗口（识别 MC 客户端而非任意 Java 程序）
+  - `IsWow64Process` 排除 32 位进程（DLL 是 x64）
+  - `TH32CS_SNAPMODULE` 检查 DLL 是否已加载 → 绝不重复注入；已注入的 PID 入集合，进程退出后从集合清除（游戏重启会自动重新注入）
+  - `CreateRemoteThread(LoadLibraryA)` 等待 3s，超时后复查模块列表再判定成败
+- **UI**：连点页第三行 = 开关按钮 + 实时状态芯片（可攻击/不可攻击/未连接）+ 快捷键按钮；状态栏第 4 个指示灯（绿=可攻击，红=不可，灰=无数据）；配置追加 2 行（末尾追加，向后兼容）
+
+### 已知限制
+
+- 多个游戏实例同时上报时取最后到达的包（正常只玩一个）
+- 游戏以管理员运行时注入会被拒，需以管理员运行本程序
+- 端口 35785 被其他程序占用时无法接收（状态显示“未连接”）
+
+## 12. 未来改进方向
 
 - 多显示器坐标支持（当前点击位置取光标，天然支持多屏）
 - 点击位置锁定（固定坐标点击）

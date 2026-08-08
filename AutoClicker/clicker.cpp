@@ -2,6 +2,7 @@
 #include "config.h"
 #include "sound.h"
 #include "overlay.h"
+#include "canattack.h"
 
 #include <Windows.h>
 #include <thread>
@@ -327,6 +328,24 @@ void ClickerThreadProc()
                 }
                 prevStart = curStart;
 
+                // can-attack gate hotkey - edge detect + async wait-release
+                {
+                    static std::atomic<bool> busyCanAtk{ false };
+                    static bool prevCanAtk = false;
+                    bool curCanAtk = vk_canattack_key && (GetAsyncKeyState(vk_canattack_key) & 0x8000) != 0;
+                    if (curCanAtk && !prevCanAtk && !busyCanAtk.exchange(true)) {
+                        std::thread([]() {
+                            while (GetAsyncKeyState(vk_canattack_key) & 0x8000) Sleep(1);
+                            canAttackOnlyClick = !canAttackOnlyClick;
+                            PlayCanAttackSound(canAttackOnlyClick);
+                            ShowCanAttackToast(canAttackOnlyClick);
+                            SaveConfig();
+                            busyCanAtk = false;
+                        }).detach();
+                    }
+                    prevCanAtk = curCanAtk;
+                }
+
                 // scroll-to-click hotkey - edge detect + async wait-release
                 bool curScroll = vk_scroll_key && (GetAsyncKeyState(vk_scroll_key) & 0x8000) != 0;
                 {
@@ -408,7 +427,22 @@ void ClickerThreadProc()
         // ---- click state machine (sub-millisecond timing) ----
         if (isMultiActive) { leftSt = CS_IDLE; rightSt = CS_IDLE; }
 
-        bool leftActive = isstart && leftenabled && mhwnd != nullptr && !isMultiActive;
+        // can-attack gate: when enabled, only the LEFT button clicks while the
+        // targeted creature is attackable (live 0/1 fed by the UDP monitor).
+        // The right button is never gated.
+        bool canAtkGate = !canAttackOnlyClick ||
+                          g_canAttack.load(std::memory_order_relaxed) == 1;
+
+        // gate flipped off mid-click: release the LEFT button immediately so
+        // the game never gets stuck with a pressed mouse button
+        if (!canAtkGate && mhwnd && leftSt == CS_WAIT_UP) {
+            GetCursorPos(&lastPt);
+            ScreenToClient(mhwnd, &lastPt);
+            MyPostMessageA(mhwnd, WM_LBUTTONUP, 0, MAKELPARAM(lastPt.x, lastPt.y));
+            leftSt = CS_IDLE;
+        }
+
+        bool leftActive = isstart && leftenabled && mhwnd != nullptr && !isMultiActive && canAtkGate;
         bool rightActive = isstart && rightenabled && mhwnd != nullptr && !isMultiActive;
 
         bool leftHeld = leftActive && ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) || keepClicke);

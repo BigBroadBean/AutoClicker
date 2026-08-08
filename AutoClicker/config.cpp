@@ -1,5 +1,6 @@
 #include "config.h"
 #include "clicker.h"
+#include "canattack.h"
 
 #include <Windows.h>
 #include <ShlObj.h>
@@ -64,6 +65,10 @@ void LoadConfig()
         autoStopSeconds = v;
     if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1)
         topmost = (v != 0);
+    if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1)
+        canAttackOnlyClick = (v != 0);
+    if (std::getline(file, line) && sscanf_s(line.c_str(), "%d", &v) == 1 && v >= 0 && v <= 255)
+        vk_canattack_key = v;
 
     leftms = cpsToMs(cpsLeft10);
     rightms = cpsToMs(cpsRight10);
@@ -92,5 +97,7 @@ void SaveConfig()
          << (g_theme == Theme::Light ? 1 : 0) << "\n"
          << (autoStopEnabled ? 1 : 0) << "\n"
          << autoStopSeconds << "\n"
-         << (topmost ? 1 : 0) << "\n";
+         << (topmost ? 1 : 0) << "\n"
+         << (canAttackOnlyClick ? 1 : 0) << "\n"
+         << vk_canattack_key << "\n";
 }

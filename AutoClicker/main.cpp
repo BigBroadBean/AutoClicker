@@ -4,6 +4,7 @@
 #include "config.h"
 #include "overlay.h"
 #include "sound.h"
+#include "canattack.h"
 
 #include <Windows.h>
 #include <dwmapi.h>
@@ -44,6 +45,7 @@ enum Elem {
     E_NAV_CLICK, E_NAV_MULTI, E_NAV_SCROLL, E_NAV_ADV,
     // click page
     E_TGL_L, E_TGL_R, E_SL_L, E_SL_R, E_BTN_KEY, E_BTN_KEEP,
+    E_BTN_CANATK, E_CHIP_CANATK, E_BTN_CANATK_KEY,
     E_PRE_L0, E_PRE_L1, E_PRE_L2, E_PRE_L3,
     E_PRE_R0, E_PRE_R1, E_PRE_R2, E_PRE_R3,
     // multi page
@@ -84,6 +86,7 @@ struct LY {
     RECT track[SL_COUNT], thumb[SL_COUNT];
     RECT tglL, tglR, tglScroll;
     RECT btnKey, btnKeep, btnMKey;
+    RECT btnCanAtk, canAtkChip, btnCanAtkKey;
     RECT preL[4], preR[4], preM[4], preD[4];
     RECT btnScrollKey, btnScrollLR, btnScrollLRKey;
     RECT inpMax, chkRand, chkAutoStop, inpAutoStop;
@@ -155,8 +158,8 @@ static void Layout()
     // ---- status bar ----
     L.status = { 12, H - 52, W - 12, H - 16 };
     {
-        int w = (L.status.right - L.status.left) / 4;
-        L.cntChip = { L.status.left + 3 * w + 8, L.status.top + 8,
+        int w = (L.status.right - L.status.left) / 5;
+        L.cntChip = { L.status.left + 4 * w + 8, L.status.top + 8,
                       L.status.right - 8, L.status.bottom - 8 };
     }
 
@@ -184,6 +187,17 @@ static void Layout()
                       L.card[2].right - 16, L.card[2].top + S(56) };
         L.btnKeep = { L.card[2].left + 16, L.card[2].top + S(66),
                       L.card[2].right - 16, L.card[2].top + S(90) };
+        // row 3: can-attack gate toggle + live status chip + hotkey
+        {
+            int cw = L.card[2].right - L.card[2].left - 32;
+            int w1 = (int)(cw * 0.50f), w2 = (int)(cw * 0.20f);
+            L.btnCanAtk = { L.card[2].left + 16, L.card[2].top + S(96),
+                            L.card[2].left + 16 + w1, L.card[2].top + S(118) };
+            L.canAtkChip = { L.btnCanAtk.right + 8, L.btnCanAtk.top,
+                             L.btnCanAtk.right + 8 + w2, L.btnCanAtk.bottom };
+            L.btnCanAtkKey = { L.canAtkChip.right + 8, L.btnCanAtk.top,
+                               L.card[2].right - 16, L.btnCanAtk.bottom };
+        }
         break;
     case PAGE_MULTI:
         L.track[SL_MUL] = { L.card[0].left + 16, L.card[0].top + S(38),
@@ -251,6 +265,9 @@ static void Layout()
         g_hr[E_SL_R] = { L.thumb[SL_R], E_SL_R, false };
         g_hr[E_BTN_KEY] = { L.btnKey, E_BTN_KEY, false };
         g_hr[E_BTN_KEEP] = { L.btnKeep, E_BTN_KEEP, false };
+        g_hr[E_BTN_CANATK] = { L.btnCanAtk, E_BTN_CANATK, false };
+        g_hr[E_CHIP_CANATK] = { L.canAtkChip, E_CHIP_CANATK, false };
+        g_hr[E_BTN_CANATK_KEY] = { L.btnCanAtkKey, E_BTN_CANATK_KEY, false };
         for (int k = 0; k < 4; k++) {
             g_hr[E_PRE_L0 + k] = { L.preL[k], (Elem)(E_PRE_L0 + k), false };
             g_hr[E_PRE_R0 + k] = { L.preR[k], (Elem)(E_PRE_R0 + k), false };
@@ -659,7 +676,7 @@ static void Paint()
         RECT vr = { tr.left, tr.top + 26, tr.right, tr.bottom };
         SetTextColor(dc, TXT_DIM());
         SelectObject(dc, g_hfSmall);
-        DrawTextW(dc, L"v2.0", -1, &vr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextW(dc, L"v2.2", -1, &vr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     }
 
     // ---- pin / theme buttons (with hover hints) ----
@@ -878,6 +895,47 @@ static void Paint()
                                      : L"\x4e0d\x9700\x8981\x6309\x4f4f\x8fde\x70b9: \x5173",
                       -1, (RECT*)&b, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
+        // can-attack gate: toggle + live status chip + hotkey
+        {
+            RECT& b = L.btnCanAtk;
+            bool hover = g_hr[E_BTN_CANATK].hover;
+            if (canAttackOnlyClick) NeuInsetAccent(dc, b, 10, 2);
+            else NeuButton(dc, b, 10, hover, false);
+            SelectObject(dc, g_hfBody);
+            SetTextColor(dc, canAttackOnlyClick ? RGB(255, 255, 255) : TXT());
+            DrawTextW(dc, canAttackOnlyClick
+                              ? L"\x4ec5\x80fd\x653b\x51fb\x65f6\x8fde\x70b9: \x5f00"
+                              : L"\x4ec5\x80fd\x653b\x51fb\x65f6\x8fde\x70b9: \x5173",
+                      -1, (RECT*)&b, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+        {
+            // live 0/1 from the UDP stream: 可攻击 / 不可攻击 / 未连接
+            RECT& chip = L.canAtkChip;
+            COLORREF cc = TXT_DIM();
+            const wchar_t* txt = L"\x672a\x8fde\x63a5";
+            if (CanAttackConnected()) {
+                if (g_canAttack.load(std::memory_order_relaxed) == 1) {
+                    cc = GREEN(); txt = L"\x53ef\x653b\x51fb";
+                } else {
+                    cc = RED(); txt = L"\x4e0d\x53ef\x653b\x51fb";
+                }
+            }
+            NeuInset(dc, chip, 8, 2, BTN());
+            SetTextColor(dc, cc);
+            SelectObject(dc, g_hfSmall);
+            DrawTextW(dc, txt, -1, (RECT*)&chip, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+        {
+            RECT& b = L.btnCanAtkKey;
+            std::wstring t = (g_rebinding == E_BTN_CANATK_KEY)
+                ? L"\x8bf7\x6309\x4e0b\x65b0\x952e\x2026"
+                : L"\x5feb\x6377\x952e: " + getKeyName(vk_canattack_key);
+            if (g_rebinding == E_BTN_CANATK_KEY) NeuInsetAccent(dc, b, 10, 2);
+            else NeuButton(dc, b, 10, g_hr[E_BTN_CANATK_KEY].hover, false);
+            SelectObject(dc, g_hfBody);
+            SetTextColor(dc, g_rebinding == E_BTN_CANATK_KEY ? RGB(255, 255, 255) : TXT());
+            DrawTextW(dc, t.c_str(), -1, (RECT*)&b, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
     }
 
     // ================= PAGE: MULTI =================
@@ -1095,8 +1153,8 @@ static void Paint()
     // ---- status bar ----
     {
         NeuRaised(dc, L.status, 12, 4, CARD());
-        int w = (L.status.right - L.status.left) / 4;
-        int x0 = L.status.left, x1 = x0 + w, x2 = x1 + w, x3 = x2 + w;
+        int w = (L.status.right - L.status.left) / 5;
+        int x0 = L.status.left, x1 = x0 + w, x2 = x1 + w, x3 = x2 + w, x4 = x3 + w;
         int baseY = L.status.top + 10;
 
         auto Dot = [&](int x, int y, COLORREF c) {
@@ -1137,6 +1195,19 @@ static void Paint()
                                                : L"\x6eda\x8f6e\x70b9 \x5173",
                       -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         }
+        // can-attack gate: dot = live attackable state (green=1 / red=0 /
+        // dim=no game connected), text = feature switch state
+        {
+            COLORREF clr = RED();
+            if (!canAttackOnlyClick) clr = RED();
+            else if (!CanAttackConnected()) clr = TXT_DIM();
+            else clr = g_canAttack.load(std::memory_order_relaxed) ? GREEN() : RED();
+            Dot(x3 + 8, baseY, clr);
+            SetTextColor(dc, clr);
+            RECT r = { x3 + 20, L.status.top, x4 - 4, L.status.bottom };
+            DrawTextW(dc, canAttackOnlyClick ? L"\x653b\x51fb \x5f00" : L"\x653b\x51fb \x5173",
+                      -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        }
         // realtime CPS chip
         {
             RECT& chip = L.cntChip;
@@ -1146,6 +1217,83 @@ static void Paint()
             wchar_t cb[32];
             swprintf(cb, 32, L"cps: %d", GetRealtimeCps());
             DrawTextW(dc, cb, -1, (RECT*)&chip, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+    }
+
+    // ---- hover tooltips (drawn last so they float above everything) ----
+    {
+        auto DrawTip = [&](const RECT& anchor, const wchar_t* const* lines, int n) {
+            SelectObject(dc, g_hfSmall);
+            int w = 0;
+            for (int i = 0; i < n; i++) {
+                SIZE sz = {};
+                GetTextExtentPoint32W(dc, lines[i], (int)wcslen(lines[i]), &sz);
+                if (sz.cx > w) w = sz.cx;
+            }
+            int padX = 10, padY = 6, lineH = 17;
+            int tw = w + padX * 2;
+            int th = n * lineH + padY * 2 - 4;
+            RECT t = { anchor.left, anchor.bottom + 5,
+                       anchor.left + tw, anchor.bottom + 5 + th };
+            // not enough room below -> flip above the anchor
+            if (t.bottom > g_cy - 8) {
+                t.top = anchor.top - 5 - th;
+                t.bottom = anchor.top - 5;
+            }
+            if (t.right > g_cx - 8) { int dx = t.right - (g_cx - 8); t.left -= dx; t.right -= dx; }
+            if (t.left < 8)         { int dx = 8 - t.left;         t.left += dx; t.right += dx; }
+            if (t.top < 8)          t.top = 8;
+            NeuRaised(dc, t, 8, 3, CARD());
+            SetTextColor(dc, TXT_DIM());
+            RECT tr = { t.left + padX, t.top + padY - 3, t.right - padX, t.bottom - padY };
+            for (int i = 0; i < n; i++) {
+                RECT lr = tr;
+                lr.top += i * lineH;
+                lr.bottom = lr.top + lineH;
+                DrawTextW(dc, lines[i], -1, &lr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            }
+        };
+
+        if (g_page == PAGE_CLICK) {
+            // can-attack gate toggle
+            if (g_hr[E_BTN_CANATK].hover) {
+                static const wchar_t* tip[] = {
+                    L"\x5f00\x542f\x540e\x4ec5\x5de6\x952e\x5728\x51c6\x661f\x5bf9\x51c6\x53ef\x653b\x51fb\x751f\x7269\x65f6\x8fde\x70b9",
+                    L"\x53f3\x952e\x4e0d\x53d7\x5f71\x54cd\xff1b\x672a\x5f00\x542f\x65f6\x5de6\x53f3\x952e\x7167\x5e38",
+                    L"\u652f\u6301\u7248\u672c\uff1a1.8.9 / 1.12.2 / 1.20.1\uff08\u542b Forge\uff09",
+                    L"\x7f51\x6613\x4e2d\x56fd\x7248\xff08\x76d2\x5b50\xff09\x53d7\x53cd\x4f5c\x5f0a\x4fdd\x62a4\xff0c\x65e0\x6cd5\x4f7f\x7528"
+                };
+                DrawTip(L.btnCanAtk, tip, 4);
+            }
+            // live status chip (text depends on current state)
+            if (g_hr[E_CHIP_CANATK].hover) {
+                if (!CanAttackConnected()) {
+                    static const wchar_t* tip[] = {
+                        L"\x672a\x6536\x5230\x6e38\x620f\x4e0a\x62a5\xff08\x672a\x6ce8\x5165/\x6e38\x620f\x672a\x8fd0\x884c\xff09",
+                        L"\x7f51\x6613\x4e2d\x56fd\x7248\x53d7\x53cd\x4f5c\x5f0a\x4fdd\x62a4\x65e0\x6cd5\x4f7f\x7528\xff0c\x6b64\x65f6\x6309\x4e0d\x53ef\x653b\x51fb\x5904\x7406"
+                    };
+                    DrawTip(L.canAtkChip, tip, 2);
+                } else if (g_canAttack.load(std::memory_order_relaxed) == 1) {
+                    static const wchar_t* tip[] = {
+                        L"\x51c6\x661f\x76ee\x6807\x53ef\x653b\x51fb\xff0c\x5de6\x952e\x53ef\x8fde\x70b9"
+                    };
+                    DrawTip(L.canAtkChip, tip, 1);
+                } else {
+                    static const wchar_t* tip[] = {
+                        L"\x51c6\x661f\x76ee\x6807\x4e0d\x53ef\x653b\x51fb\x6216\x672a\x5bf9\x51c6",
+                        L"\x5de6\x952e\x8fde\x70b9\x5df2\x6682\x505c"
+                    };
+                    DrawTip(L.canAtkChip, tip, 2);
+                }
+            }
+            // can-attack hotkey
+            if (g_hr[E_BTN_CANATK_KEY].hover) {
+                static const wchar_t* tip[] = {
+                    L"\x8bbe\x7f6e\x5f00\x5173\x5feb\x6377\x952e",
+                    L"\x6309\x4e0b\x4efb\x610f\x952e\x7ed1\x5b9a \xb7 Esc \x53d6\x6d88"
+                };
+                DrawTip(L.btnCanAtkKey, tip, 2);
+            }
         }
     }
 }
@@ -1255,6 +1403,13 @@ static void Click(HWND hwnd, Elem e)
     case E_TGL_L: leftenabled = !leftenabled; break;
     case E_TGL_R: rightenabled = !rightenabled; break;
     case E_BTN_KEEP: keepClicke = !keepClicke; break;
+    case E_BTN_CANATK:
+        canAttackOnlyClick = !canAttackOnlyClick;
+        PlayCanAttackSound(canAttackOnlyClick);
+        ShowCanAttackToast(canAttackOnlyClick);
+        if (canAttackOnlyClick && !CanAttackDllAvailable())
+            ShowToast(L"\x63d0\x793a", L"\x672a\x627e\x5230 DLL", RED());
+        break;
     case E_PRE_L0: case E_PRE_L1: case E_PRE_L2: case E_PRE_L3: {
         int idx = e - E_PRE_L0;
         int c10 = kCpsPresets[idx] * 10;
@@ -1361,6 +1516,18 @@ static void Click(HWND hwnd, Elem e)
             if (ok) PlayScrollLRSound();
         }
         break;
+    case E_BTN_CANATK_KEY:
+        if (g_rebinding != E_NONE) break;
+        g_rebinding = E_BTN_CANATK_KEY;
+        ShowToast(L"\x8bbe\x7f6e\x5feb\x6377\x952e", L"\x6309\x4e0b\x4efb\x610f\x952e \xb7 Esc \x53d6\x6d88", ACCENT());
+        Redraw(hwnd);
+        {
+            bool ok = CaptureKey(vk_canattack_key);
+            g_rebinding = E_NONE;
+            g_debounceUntil = GetTickCount64() + 200;
+            if (ok) PlayScrollLRSound();
+        }
+        break;
 
     default: return;
     }
@@ -1432,6 +1599,8 @@ int WINAPI WinMain(HINSTANCE hI, HINSTANCE, LPSTR, int nShow)
     ShowWindow(hwnd, nShow); UpdateWindow(hwnd);
     std::thread(ClickerThreadProc).detach();
     StartMultiClickHook();
+    StartCanAttackMonitor();
+    StartInjectorThread();
     SetTimer(hwnd, TIMER_RENDER, 16, nullptr);
     MSG msg = {};
     for (;;) {
@@ -1471,7 +1640,10 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
             int cps = GetRealtimeCps();
             int st = (isstart ? 1 : 0) | (isMultiActive ? 2 : 0) |
                      (isScrollClickActive ? 4 : 0) | ((int)g_page << 3) |
-                     (randomCpsEnabled ? 128 : 0) | (g_inputOn ? 256 : 0);
+                     (randomCpsEnabled ? 128 : 0) | (g_inputOn ? 256 : 0) |
+                     (canAttackOnlyClick ? 512 : 0) |
+                     (g_canAttack.load() ? 1024 : 0) |
+                     (CanAttackConnected() ? 2048 : 0);
             if (c != s_lastCount || cps != s_lastCps || st != s_lastStates) {
                 g_dirty = true;
                 s_lastCount = c;

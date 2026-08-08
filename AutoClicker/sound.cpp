@@ -34,3 +34,8 @@ void PlayScrollLRSound()
 {
     PlayMediaSound(L"Windows Navigation Start.wav");
 }
+
+void PlayCanAttackSound(bool enabled)
+{
+    PlayMediaSound(enabled ? L"Windows Hardware Insert.wav" : L"Windows Hardware Remove.wav");
+}

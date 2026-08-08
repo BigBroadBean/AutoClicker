@@ -15,3 +15,9 @@ inline void ShowScrollLRToast(int button) {
               button == 0 ? L"\x5de6\x952e" : L"\x53f3\x952e",
               ACCENT());
 }
+
+inline void ShowCanAttackToast(bool enabled) {
+    ShowToast(L"\x4ec5\x80fd\x653b\x51fb\x65f6\x8fde\x70b9",
+              enabled ? L"\x5f00" : L"\x5173",
+              enabled ? GREEN() : RED());
+}
